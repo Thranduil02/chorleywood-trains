@@ -3,9 +3,9 @@
   'use strict';
   var C = window.Core, ID = C.ID;
   var TFL = 'https://api.tfl.gov.uk';
-  var DEFAULT_BASE = 'https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120'; // Rail Data Marketplace live departure board
+  var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v16';
+  var BUILD = 'v17';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 1600; // TfL allows roughly 50 anonymous requests a minute
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -365,9 +365,9 @@
       '<div class="li"><div><div class="n">Chiltern Railways</div><div class="d">' + (c.checkedAt ? nDays + ' days stored · checked ' + when(c.checkedAt) : 'Nothing stored') + (c.error ? ' · ' + esc(c.error) : '') + '</div></div>' + sp(c.status) + '</div></section>' +
       '<section class="note"><b>How times are shown.</b> Online, each time is the live prediction, with the timetable time beneath it when they differ. Offline, you see the stored timetable only.</section>' +
       '<button class="btn" type="button" data-act="check"' + (S.syncing ? ' disabled' : '') + '>' + (S.syncing ? 'Checking…' : 'Check now') + '</button>' +
-      '<section class="list" aria-label="Settings"><h2>National Rail live key</h2>' +
-      '<div class="field"><label for="tok">Rail Data Marketplace API key</label><input id="tok" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(store.settings.token) + '"></div>' +
-      '<div class="field"><label for="base">Live service address (optional; use your own proxy here)</label><input id="base" type="url" autocapitalize="off" spellcheck="false" placeholder="' + DEFAULT_BASE + '" value="' + esc(store.settings.base) + '"></div>' +
+      '<section class="list" aria-label="Settings"><h2>Live data connection</h2>' +
+      '<div class="field"><label for="tok">Rail Data Marketplace API key (not needed with the built-in proxy)</label><input id="tok" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(store.settings.token) + '"></div>' +
+      '<div class="field"><label for="base">Live service address (optional)</label><input id="base" type="url" autocapitalize="off" spellcheck="false" placeholder="' + DEFAULT_BASE + '" value="' + esc(store.settings.base) + '"></div>' +
       '<div class="field"><button class="btn sec" type="button" data-act="save">Save and refresh live data</button></div></section>' +
       '<details><summary>Diagnostics</summary><pre>' + esc(diagnostics()) + '</pre></details>' +
       '<section class="note">To install: in Safari tap Share, then Add to Home Screen. Open it once with a connection so the timetables can be stored.</section>' +

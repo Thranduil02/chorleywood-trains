@@ -244,14 +244,7 @@
   }
 
   function footLink() {
-    var t = store.tfl || {}, c = store.chiltern || {};
-    var txt;
-    if (S.syncing) txt = 'Checking timetables…';
-    else if (!t.out && !c.checkedAt) txt = 'No timetables stored yet';
-    else if (t.status === 'error' || c.status === 'error') txt = (t.out || c.checkedAt) ? 'Using stored timetables · couldn\'t check for updates' : 'Timetable check failed · tap for details';
-    else if ((t.changedAt && Date.now() - t.changedAt < 864e5 && t.status === 'updated') || (c.status === 'updated' && c.changedAt && Date.now() - c.changedAt < 864e5)) txt = 'Timetable updated · checked ' + when(Math.max(t.checkedAt || 0, c.checkedAt || 0));
-    else txt = 'Timetables unchanged · checked ' + when(Math.max(t.checkedAt || 0, c.checkedAt || 0));
-    return '<a class="link" href="#data"><span>' + esc(txt) + '</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></a>';
+    return '<a class="link" href="#data"><span>Data and Sync Status</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></a>';
   }
 
   function viewMain(dir) {
@@ -275,10 +268,16 @@
 
   var STATUS = { new: ['Stored', 'ok'], same: ['Matches', 'ok'], updated: ['Updated', 'late'], error: ['Check failed', 'late'], none: ['Not stored', 'late'] };
   function sp(s) { var x = STATUS[s || 'none'] || STATUS.none; return '<span class="chip ' + x[1] + '" style="white-space:nowrap">' + x[0] + '</span>'; }
-  function liveRow(name, x, extra) {
-    var ok = fresh(x);
-    var detail = !x ? 'Not tried yet' : (x.ok ? 'Updated ' + C.fmt(C.londonNow(x.at).minutes) + (extra ? ' · ' + extra : '') : esc(x.err));
-    return '<div class="li"><div><div class="n">' + name + '</div><div class="d">' + detail + '</div></div><span class="chip ' + (ok ? 'ok' : 'late') + '" style="white-space:nowrap">' + (ok ? 'Connected' : 'Unavailable') + '</span></div>';
+  function liveRow(name, xs, extra) {
+    var ok = xs.every(fresh);
+    var bad = xs.filter(function (x) { return !(x && x.ok); })[0];
+    var at = Math.max.apply(null, xs.map(function (x) { return x && x.ok ? x.at : 0; }));
+    var detail;
+    if (ok) detail = 'Updated ' + C.fmt(C.londonNow(at).minutes) + (extra ? ' \u00b7 ' + extra : '');
+    else if (bad) detail = esc(bad.err);
+    else if (xs.some(function (x) { return !x; })) detail = 'Not tried yet';
+    else detail = 'Last update ' + C.fmt(C.londonNow(at).minutes) + ' is out of date';
+    return '<div class="li"><div><div class="n">' + name + '</div><div class="d">' + detail + '</div></div><span class="chip ' + (ok ? 'good' : 'bad') + '" style="white-space:nowrap">' + (ok ? 'Connected' : 'Not connected') + '</span></div>';
   }
   function diagnostics() {
     var L = [];
@@ -311,10 +310,8 @@
     return '<a class="back" href="#' + store.settings.tab + '"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>Back</a>' +
       '<h1>Data and sync</h1>' +
       '<section class="list" aria-label="Live feeds"><h2>Live feeds</h2>' +
-      liveRow('TfL arrivals (Chorleywood)', S.live.cyd, S.live.cyd && S.live.cyd.ok ? S.live.cyd.ms.length + (S.live.cyd.ms.length === 1 ? ' train' : ' trains') : '') +
-      liveRow('TfL arrivals (Baker Street)', S.live.bst, S.live.bst && S.live.bst.ok ? S.live.bst.ms.length + (S.live.bst.ms.length === 1 ? ' train' : ' trains') : '') +
-      liveRow('Chiltern, Chorleywood to Marylebone', S.live.toLondon) +
-      liveRow('Chiltern, Marylebone to Chorleywood', S.live.toChorley) + '</section>' +
+      liveRow('TfL', [S.live.cyd, S.live.bst], S.live.cyd && S.live.bst && S.live.cyd.ok && S.live.bst.ok ? (S.live.cyd.ms.length + S.live.bst.ms.length) + ' trains tracked' : '') +
+      liveRow('Chiltern Railways', [S.live.toLondon, S.live.toChorley]) + '</section>' +
       '<section class="list" aria-label="Stored timetables"><h2>Stored timetables</h2>' +
       '<div class="li"><div><div class="n">TfL Metropolitan line</div><div class="d">' + (t.fetchedAt ? 'Stored ' + when(t.fetchedAt) + ' · checked ' + when(t.checkedAt) : 'Nothing stored') + (t.error ? ' · ' + esc(t.error) : '') + '</div></div>' + sp(t.status) + '</div>' +
       '<div class="li"><div><div class="n">Chiltern Railways</div><div class="d">' + (c.checkedAt ? nDays + ' days stored · checked ' + when(c.checkedAt) : 'Nothing stored') + (c.error ? ' · ' + esc(c.error) : '') + '</div></div>' + sp(c.status) + '</div></section>' +

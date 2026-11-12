@@ -11,6 +11,8 @@ const TFL_ROUTES = [
   { re: /^\/StopPoint\/940GZZLU[A-Z]{3}\/Arrivals$/, ttl: 20, params: [] },
   { re: /^\/Line\/metropolitan\/Timetable\/940GZZLU[A-Z]{3}\/to\/940GZZLU[A-Z]{3}$/, ttl: 600, params: [] },
   { re: /^\/Journey\/JourneyResults\/910G[A-Z]+\/to\/910G[A-Z]+$/, ttl: 600, params: ['mode', 'date', 'time', 'timeIs'] },
+  // Trackernet (per-train location, platform and set number); XML. Experimental.
+  { re: /^\/TrackerNet\/PredictionDetailed\/M\/[A-Z]{3}$/i, ttl: 15, params: [] },
 ];
 
 export default {

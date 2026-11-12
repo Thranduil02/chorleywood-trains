@@ -71,7 +71,16 @@
     Object.keys(rec.days).forEach(function (k) { if (k < C.dateAdd(today.date, -1)) delete rec.days[k]; });
     function getJ(ymd, hhmm) {
       var url = TFL + '/Journey/JourneyResults/' + d.from + '/to/' + d.to + '?mode=national-rail&date=' + ymd + '&time=' + hhmm + '&timeIs=Departing';
-      return getJson(url, 15000).then(function (j) { return sleep(150).then(function () { return j; }); });
+      var tries = 0;
+      function go() {
+        return getJson(url, 15000).catch(function (e) {
+          var m = /HTTP (\d+)/.exec((e && e.message) || '');
+          if (m && m[1] === '404') return { journeys: [] }; // "no journey found" is an empty result, not a failure
+          if (++tries > 3) throw e;
+          return sleep(tries * 1500).then(go);
+        });
+      }
+      return go().then(function (j) { return sleep(150).then(function () { return j; }); });
     }
     var stale = false, changed = false, isNew = false;
     var step = Promise.resolve();
@@ -95,6 +104,10 @@
               if (!day) isNew = true; else if (day.hash !== h) changed = true;
               rec.days[date] = { fetchedAt: Date.now(), hash: h, trains: trains };
               log('Chiltern ' + d.k + ' ' + date + ': ' + trains.length + ' trains' + (day ? (day.hash === h ? ' (unchanged)' : ' (CHANGED)') : ''));
+            }).catch(function (e) {
+              // keep an older stored copy of a future day rather than failing the whole check
+              log('Chiltern ' + d.k + ' ' + date + ' failed: ' + errText(e));
+              if (!day || date === today.date) throw e;
             });
           });
         })(C.dateAdd(today.date, i));
@@ -213,7 +226,7 @@
     var h = '<section class="card" aria-label="Next Chiltern train">' + head + cancelled +
       '<div class="row" style="align-items:flex-end"><div><div class="lbl">Departs</div><div class="big num">' + C.fmt(first.dep) + '</div>' +
       (line2 ? '<div class="sub">' + line2 + '</div>' : '') + '</div>' +
-      '<div style="text-align:right"><div class="lbl">Arrives ' + (toL ? 'Marylebone' : 'Chorleywood') + '</div><div class="mid num">' + (first.arr != null ? C.fmt(first.arr) : '–') + '</div>' +
+      '<div style="text-align:right"><div class="lbl">Arrives at ' + (toL ? 'Marylebone' : 'Chorleywood') + '</div><div class="mid num">' + (first.arr != null ? C.fmt(first.arr) : '–') + '</div>' +
       (arrSub ? '<div class="sub">' + arrSub + '</div>' : '') + '</div></div>' +
       statusRow(first, toL);
     h += between;
@@ -261,7 +274,7 @@
     else if (cl && !cl.ok && !store.settings.token) banner = '<div class="banner">Chiltern live times need a National Rail token. Add it under Data and sync; until then Chiltern times come from the timetable.</div>';
     else if (cl && !cl.ok) banner = '<div class="banner">Chiltern live times unavailable (' + esc(cl.err) + '). Showing the timetable.</div>';
     else if (tl && !tl.ok) banner = '<div class="banner">TfL live times unavailable (' + esc(tl.err) + '). Showing the timetable.</div>';
-    return '<div class="row"><h1>' + (toL ? 'Chorleywood' : 'London') + '</h1>' + statusPill() + '</div>' +
+    return '<div class="row"><h1 class="serif">' + (toL ? 'Chorleywood' : 'London') + '</h1>' + statusPill() + '</div>' +
       '<nav class="tabs" aria-label="Direction"><a href="#london"' + (toL ? ' aria-current="page"' : '') + '>To London</a><a href="#chorley"' + (!toL ? ' aria-current="page"' : '') + '>To Chorleywood</a></nav>' +
       banner + chilternCard(chRows, toL, chT.length > 0, S.syncing) + tubeCard(tubes, toL, !!tt, S.syncing) + footLink();
   }

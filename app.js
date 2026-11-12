@@ -25,7 +25,17 @@
     if (store.log.length > 40) store.log.splice(0, store.log.length - 40);
   }
 
+  var LIVE_KEY = 'trains.live.v1';
+  function loadLive() { // keep the last live readings across reloads, so platforms and delays don't vanish while the new fetch is in flight
+    var out = {};
+    try { var o = JSON.parse(localStorage.getItem(LIVE_KEY)) || {}; Object.keys(o).forEach(function (k) { if (o[k] && o[k].ok && Date.now() - o[k].at < 150000) out[k] = o[k]; }); } catch (e) { /* ignore */ }
+    return out;
+  }
+  function saveLive() {
+    try { var o = {}; Object.keys(S.live).forEach(function (k) { if (S.live[k] && S.live[k].ok) o[k] = S.live[k]; }); localStorage.setItem(LIVE_KEY, JSON.stringify(o)); } catch (e) { /* ignore */ }
+  }
   var S = { live: {}, syncing: false, liveTried: false, view: 'london' };
+  S.live = loadLive();
 
   /* ---------- helpers ---------- */
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -179,7 +189,7 @@
       liveTube('bst', ID.BST, C.bakerStreetToChorleywood, 60000),
       liveChiltern('toLondon', 'CLW', 'MYB', manual),
       liveChiltern('toChorley', 'MYB', 'CLW', manual)
-    ]).then(render);
+    ]).then(function () { saveLive(); render(); });
   }
 
   /* ---------- views ---------- */

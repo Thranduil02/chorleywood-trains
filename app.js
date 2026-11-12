@@ -5,7 +5,7 @@
   var TFL = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v18';
+  var BUILD = 'v20';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 1600; // TfL allows roughly 50 anonymous requests a minute
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -192,9 +192,7 @@
   }
   function liveChiltern(slot, from, to, manual) {
     var prev = S.live[slot];
-    var base = store.settings.base || DEFAULT_BASE;
-    var rq = C.liveBoardRequest(base, store.settings.token, from, to);
-    if (rq.needsKey && !store.settings.token) { S.live[slot] = { ok: false, at: Date.now(), err: 'No National Rail key set' }; return Promise.resolve(); }
+    var rq = C.liveBoardRequest(DEFAULT_BASE, '', from, to); // the built-in Worker holds the key
     if (!manual && prev && !prev.ok && Date.now() - prev.at < 300000) return Promise.resolve(); // back off after a failure
     return getJson(rq.url, 10000, rq.headers).then(function (j) {
       S.live[slot] = { ok: true, at: Date.now(), rows: C.parseDarwin(j, to), raw: (j.trainServices || []).length };
@@ -310,7 +308,6 @@
     var chRows = C.chilternNext(chT, fresh(cl) ? cl.rows : null, now, 2);
     var banner = '';
     if (navigator.onLine === false) banner = '<div class="banner">No connection. Showing the stored timetable, so delays and cancellations won\'t appear.</div>';
-    else if (cl && !cl.ok && cl.err === 'No National Rail key set') banner = '<div class="banner">Chiltern live times need a National Rail key. Add it under Data &amp; Sync Status; until then Chiltern times come from the timetable.</div>';
     else if (cl && !cl.ok) banner = '<div class="banner">Chiltern live times unavailable (' + esc(cl.err) + '). Showing the timetable.</div>';
     else if (tl && !tl.ok) banner = '<div class="banner">TfL live times unavailable (' + esc(tl.err) + '). Showing the timetable.</div>';
     return '<div class="row"><h1 class="serif">' + (toL ? 'Chorleywood' : 'London') + '</h1>' + statusPill() + '</div>' +
@@ -375,13 +372,10 @@
       '<div class="li"><div><div class="n">Chiltern Railways</div><div class="d">' + (c.checkedAt ? nDays + ' days stored · checked ' + when(c.checkedAt) : 'Nothing stored') + (c.error ? ' · ' + esc(c.error) : '') + '</div></div>' + sp(c.status) + '</div></section>' +
       '<section class="note"><b>How times are shown.</b> Online, each time is the live prediction, with the timetable time beneath it when they differ. Offline, you see the stored timetable only.</section>' +
       '<button class="btn" type="button" data-act="check"' + (S.syncing ? ' disabled' : '') + '>' + (S.syncing ? 'Checking…' : 'Check now') + '</button>' +
-      '<section class="list" aria-label="Settings"><h2>Live data connection</h2>' +
-      '<div class="field"><label for="tok">Rail Data Marketplace API key (not needed with the built-in proxy)</label><input id="tok" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(store.settings.token) + '"></div>' +
-      '<div class="field"><label for="base">Live service address (optional)</label><input id="base" type="url" autocapitalize="off" spellcheck="false" placeholder="' + DEFAULT_BASE + '" value="' + esc(store.settings.base) + '"></div>' +
-      '<div class="field"><button class="btn sec" type="button" data-act="save">Save and refresh live data</button></div></section>' +
       '<details><summary>Diagnostics</summary><pre>' + esc(diagnostics()) + '</pre></details>' +
       '<section class="note">To install: in Safari tap Share, then Add to Home Screen. Open it once with a connection so the timetables can be stored.</section>' +
-      '<button class="btn sec" type="button" data-act="reset">Clear stored data</button>';
+      '<button class="btn sec" type="button" data-act="reset">Clear stored data</button>' +
+      '<div class="small" style="text-align:center;margin:12px 0">Build ' + BUILD + '</div>';
   }
 
   var appEl = document.getElementById('app');
@@ -408,12 +402,7 @@
     if (!el) return;
     var a = el.getAttribute('data-act');
     if (a === 'check') { refreshLive(true); syncAll(true); }
-    else if (a === 'save') {
-      store.settings.token = document.getElementById('tok').value.trim();
-      store.settings.base = document.getElementById('base').value.trim();
-      save(); document.activeElement.blur(); S.live.toLondon = S.live.toChorley = null;
-      refreshLive(true);
-    } else if (a === 'reset') {
+    else if (a === 'reset') {
       if (window.confirm('Clear the stored timetables? You will need a connection to fetch them again.')) {
         var keep = store.settings;
         store = { settings: keep, chiltern: {}, log: [] }; save(); render();

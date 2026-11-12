@@ -240,7 +240,8 @@
   // Baker Street, northbound platforms: everything that leaves towards Amersham/Chesham, Watford or Uxbridge.
   function bakerStreetNorthbound(a) {
     var d = (a.destinationName || '') + ' ' + (a.towards || '');
-    if (/aldgate/i.test(d) || a.direction === 'outbound') return false;
+    // Aldgate: southbound. "Baker Street": a train arriving from the north that terminates here, not a departure.
+    if (/aldgate|baker street/i.test(d) || a.direction === 'outbound') return false;
     return /^northbound/i.test(a.platformName || '') || branchOf(a) !== null;
   }
 

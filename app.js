@@ -3,9 +3,9 @@
   'use strict';
   var C = window.Core, ID = C.ID;
   var TFL = 'https://api.tfl.gov.uk';
-  var DEFAULT_BASE = 'https://huxley2.azurewebsites.net';
+  var DEFAULT_BASE = 'https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120'; // Rail Data Marketplace live departure board
   var KEY = 'trains.store.v1';
-  var BUILD = 'v14';
+  var BUILD = 'v15';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 1600; // TfL allows roughly 50 anonymous requests a minute
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -47,10 +47,10 @@
   }
   function fresh(x) { return !!(x && x.ok && Date.now() - x.at < 150000); }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-  function getJson(url, ms) {
+  function getJson(url, ms, headers) {
     var ctl = new AbortController();
     var to = setTimeout(function () { ctl.abort(); }, ms || 12000);
-    return fetch(url, { signal: ctl.signal, cache: 'no-store' }).then(function (r) {
+    return fetch(url, { signal: ctl.signal, cache: 'no-store', headers: headers || undefined }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).finally(function () { clearTimeout(to); });
@@ -187,13 +187,18 @@
   }
   function liveChiltern(slot, from, to, manual) {
     var prev = S.live[slot];
-    if (!store.settings.token) { S.live[slot] = { ok: false, at: Date.now(), err: 'No National Rail token set' }; return Promise.resolve(); }
+    if (!store.settings.token) { S.live[slot] = { ok: false, at: Date.now(), err: 'No National Rail key set' }; return Promise.resolve(); }
     if (!manual && prev && !prev.ok && Date.now() - prev.at < 300000) return Promise.resolve(); // back off after a failure
     var base = (store.settings.base || DEFAULT_BASE).replace(/\/+$/, '');
-    var tok = store.settings.token ? '&accessToken=' + encodeURIComponent(store.settings.token) : '';
-    return getJson(base + '/departures/' + from + '/to/' + to + '/8?expand=true' + tok, 10000).then(function (j) {
+    var rdm = /raildata\.org\.uk/i.test(base);
+    var url = rdm ? base + '/GetDepBoardWithDetails/' + from + '?filterCRS=' + to + '&filterType=to&numRows=8'
+                  : base + '/departures/' + from + '/to/' + to + '/8?expand=true&accessToken=' + encodeURIComponent(store.settings.token); // older Huxley-style proxy
+    return getJson(url, 10000, rdm ? { 'x-apikey': store.settings.token } : null).then(function (j) {
       S.live[slot] = { ok: true, at: Date.now(), rows: C.parseDarwin(j, to), raw: (j.trainServices || []).length };
-    }).catch(function (e) { S.live[slot] = { ok: false, at: Date.now(), err: errText(e) }; });
+    }).catch(function (e) {
+      var m = errText(e);
+      S.live[slot] = { ok: false, at: Date.now(), err: /HTTP (401|403)/.test(m) ? 'Key rejected (' + m + ')' : m };
+    });
   }
   function refreshLive(manual) {
     if (!manual && S.backoffUntil && Date.now() < S.backoffUntil) return Promise.resolve(); // rate limited: wait out the minute
@@ -299,7 +304,7 @@
     var chRows = C.chilternNext(chT, fresh(cl) ? cl.rows : null, now, 2);
     var banner = '';
     if (navigator.onLine === false) banner = '<div class="banner">No connection. Showing the stored timetable, so delays and cancellations won\'t appear.</div>';
-    else if (cl && !cl.ok && !store.settings.token) banner = '<div class="banner">Chiltern live times need a National Rail token. Add it under Data and sync; until then Chiltern times come from the timetable.</div>';
+    else if (cl && !cl.ok && !store.settings.token) banner = '<div class="banner">Chiltern live times need a National Rail key. Add it under Data & Sync Status; until then Chiltern times come from the timetable.</div>';
     else if (cl && !cl.ok) banner = '<div class="banner">Chiltern live times unavailable (' + esc(cl.err) + '). Showing the timetable.</div>';
     else if (tl && !tl.ok) banner = '<div class="banner">TfL live times unavailable (' + esc(tl.err) + '). Showing the timetable.</div>';
     return '<div class="row"><h1 class="serif">' + (toL ? 'Chorleywood' : 'London') + '</h1>' + statusPill() + '</div>' +
@@ -362,8 +367,8 @@
       '<div class="li"><div><div class="n">Chiltern Railways</div><div class="d">' + (c.checkedAt ? nDays + ' days stored · checked ' + when(c.checkedAt) : 'Nothing stored') + (c.error ? ' · ' + esc(c.error) : '') + '</div></div>' + sp(c.status) + '</div></section>' +
       '<section class="note"><b>How times are shown.</b> Online, each time is the live prediction, with the timetable time beneath it when they differ. Offline, you see the stored timetable only.</section>' +
       '<button class="btn" type="button" data-act="check"' + (S.syncing ? ' disabled' : '') + '>' + (S.syncing ? 'Checking…' : 'Check now') + '</button>' +
-      '<section class="list" aria-label="Settings"><h2>National Rail live token</h2>' +
-      '<div class="field"><label for="tok">Darwin access token</label><input id="tok" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(store.settings.token) + '"></div>' +
+      '<section class="list" aria-label="Settings"><h2>National Rail live key</h2>' +
+      '<div class="field"><label for="tok">Rail Data Marketplace API key</label><input id="tok" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(store.settings.token) + '"></div>' +
       '<div class="field"><label for="base">Live service address (optional)</label><input id="base" type="url" autocapitalize="off" spellcheck="false" placeholder="' + DEFAULT_BASE + '" value="' + esc(store.settings.base) + '"></div>' +
       '<div class="field"><button class="btn sec" type="button" data-act="save">Save and refresh live data</button></div></section>' +
       '<details><summary>Diagnostics</summary><pre>' + esc(diagnostics()) + '</pre></details>' +

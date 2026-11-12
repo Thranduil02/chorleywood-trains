@@ -220,9 +220,18 @@
       if (filterFn && !filterFn(a)) return;
       var t = Date.parse(a.expectedArrival);
       var pm = /platform\s*([0-9]+[a-z]?)/i.exec(a.platformName || '');
-      if (!isNaN(t)) out.push({ t: t, platform: pm ? pm[1] : null, raw: a.platformName || '' });
+      if (!isNaN(t)) out.push({ t: t, platform: pm ? pm[1] : null, raw: a.platformName || '', vid: a.vehicleId || null });
     });
-    return out.sort(function (a, b) { return a.t - b.t; });
+    out.sort(function (a, b) { return a.t - b.t; });
+    var seen = {}; // TfL can list one vehicle twice with different platforms: keep its earliest prediction
+    return out.filter(function (x) { if (!x.vid) return true; if (seen[x.vid]) return false; seen[x.vid] = true; return true; });
+  }
+  // Baker Street: trains for Chorleywood leave on the northbound platforms. TfL labels their destination
+  // inconsistently (Amersham, Chesham, "Baker Street", or blank), so exclude the branches that miss Chorleywood instead.
+  function bakerStreetToChorleywood(a) {
+    var d = (a.destinationName || '') + ' ' + (a.towards || '');
+    if (/watford|uxbridge|aldgate/i.test(d)) return false;
+    return /^northbound/i.test(a.platformName || '') || /amersham|chesham/i.test(d);
   }
 
   /* ---------- Chiltern ---------- */
@@ -359,7 +368,7 @@
     pad: pad, hm: hm, fmt: fmt, hash: hash, dateAdd: dateAdd, dayDiff: dayDiff, absFromLocal: absFromLocal,
     londonNow: londonNow, classify: classify, describeSkips: describeSkips, parseDays: parseDays,
     parseTimetable: parseTimetable, tubeCandidates: tubeCandidates, matchLive: matchLive, nextTubes: nextTubes,
-    parseArrivals: parseArrivals, parseJourneys: parseJourneys, buildDay: buildDay, flattenDays: flattenDays,
+    parseArrivals: parseArrivals, bakerStreetToChorleywood: bakerStreetToChorleywood, parseJourneys: parseJourneys, buildDay: buildDay, flattenDays: flattenDays,
     windowMatches: windowMatches, parseDarwin: parseDarwin, chilternNext: chilternNext
   };
 });

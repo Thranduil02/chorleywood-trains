@@ -153,9 +153,10 @@
   }
 
   /* ---------- live data ---------- */
-  function liveTube(slot, stopId, filter) {
+  function liveTube(slot, stopId, filter, shiftMs) {
     return getJson(TFL + '/StopPoint/' + stopId + '/Arrivals', 10000).then(function (j) {
       var preds = C.parseArrivals(j, filter);
+      if (shiftMs) preds.forEach(function (p) { p.t += shiftMs; }); // Baker Street: arrival time plus about a minute's dwell approximates departure
       var plats = {};
       preds.forEach(function (p) { plats[p.raw || '(none)'] = true; });
       S.live[slot] = { ok: true, at: Date.now(), preds: preds, ms: preds.map(function (p) { return p.t; }), plats: Object.keys(plats), raw: (j || []).length };
@@ -163,6 +164,7 @@
   }
   function liveChiltern(slot, from, to, manual) {
     var prev = S.live[slot];
+    if (!store.settings.token) { S.live[slot] = { ok: false, at: Date.now(), err: 'No National Rail token set' }; return Promise.resolve(); }
     if (!manual && prev && !prev.ok && Date.now() - prev.at < 300000) return Promise.resolve(); // back off after a failure
     var base = (store.settings.base || DEFAULT_BASE).replace(/\/+$/, '');
     var tok = store.settings.token ? '&accessToken=' + encodeURIComponent(store.settings.token) : '';
@@ -174,7 +176,7 @@
     S.liveTried = true;
     return Promise.all([
       liveTube('cyd', ID.CYD, function (a) { return /southbound/i.test(a.platformName || '') || a.direction === 'outbound'; }),
-      liveTube('bst', ID.BST, function (a) { return /amersham|chesham/i.test((a.destinationName || '') + ' ' + (a.towards || '')); }),
+      liveTube('bst', ID.BST, C.bakerStreetToChorleywood, 60000),
       liveChiltern('toLondon', 'CLW', 'MYB', manual),
       liveChiltern('toChorley', 'MYB', 'CLW', manual)
     ]).then(render);

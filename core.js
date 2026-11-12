@@ -27,7 +27,7 @@
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function hm(s) { var m = /^(\d{1,2}):(\d{2})/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; }
   function fmt(absMin) {
-    var m = ((Math.round(absMin) % 1440) + 1440) % 1440;
+    var m = ((Math.floor(absMin + 1e-9) % 1440) + 1440) % 1440;
     return pad(Math.floor(m / 60)) + ':' + pad(m % 60);
   }
   function hash(str) {

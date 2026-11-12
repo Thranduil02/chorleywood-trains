@@ -140,8 +140,10 @@
   /* ---------- live data ---------- */
   function liveTube(slot, stopId, filter) {
     return getJson(TFL + '/StopPoint/' + stopId + '/Arrivals', 10000).then(function (j) {
-      var ms = C.parseArrivals(j, filter);
-      S.live[slot] = { ok: true, at: Date.now(), ms: ms, raw: (j || []).length };
+      var preds = C.parseArrivals(j, filter);
+      var plats = {};
+      preds.forEach(function (p) { plats[p.raw || '(none)'] = true; });
+      S.live[slot] = { ok: true, at: Date.now(), preds: preds, ms: preds.map(function (p) { return p.t; }), plats: Object.keys(plats), raw: (j || []).length };
     }).catch(function (e) { S.live[slot] = { ok: false, at: Date.now(), err: errText(e) }; });
   }
   function liveChiltern(slot, from, to, manual) {
@@ -182,6 +184,16 @@
     return '';
   }
 
+  function statusRow(first, toL) {
+    var c1 = chip(first.status, first.delay, first.live);
+    var pc = '';
+    if (!toL) { // Marylebone to Chorleywood: platforms matter, and are only known from the live board
+      if (first.platform) pc = '<span class="chip ok" style="font-weight:700;color:#14161A">Platform ' + esc(first.platform) + '</span>';
+      else if (first.live) pc = '<span class="small">Platform not announced yet</span>';
+    }
+    return c1 || pc ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' + c1 + pc + '</div>' : '';
+  }
+
   function chilternCard(rows, toL, haveTT, syncing) {
     var head = '<div class="row"><span class="tag ch">Chiltern Railways</span><span class="sub" style="margin:0">' + (toL ? 'to Marylebone' : 'to Chorleywood') + '</span></div>';
     var good = rows.filter(function (r) { return r.status !== 'cancelled'; });
@@ -195,7 +207,7 @@
     var cancelled = rows.filter(function (r) { return r.status === 'cancelled' && r.sched <= first.sched; }).map(cline).join('');
     var between = rows.filter(function (r) { return r.status === 'cancelled' && r.sched > first.sched && (!second || r.sched < second.sched); }).map(cline).join('');
     var dest = first.dest && !toL ? 'to ' + esc(first.dest) : '';
-    var plat = first.platform ? 'Platform ' + esc(first.platform) : '';
+    var plat = toL && first.platform ? 'Platform ' + esc(first.platform) : '';
     var line2 = [first.status === 'late' || (first.live && first.sched !== first.dep) ? 'Timetable ' + C.fmt(first.sched) : (first.live ? '' : 'Timetable'), dest, plat].filter(Boolean).join(' · ');
     var arrSub = first.arr != null && first.schedArr != null && Math.round(first.arr) !== Math.round(first.schedArr) ? 'Timetable ' + C.fmt(first.schedArr) : '';
     var h = '<section class="card" aria-label="Next Chiltern train">' + head + cancelled +
@@ -203,11 +215,11 @@
       (line2 ? '<div class="sub">' + line2 + '</div>' : '') + '</div>' +
       '<div style="text-align:right"><div class="lbl">Arrives ' + (toL ? 'Marylebone' : 'Chorleywood') + '</div><div class="mid num">' + (first.arr != null ? C.fmt(first.arr) : '–') + '</div>' +
       (arrSub ? '<div class="sub">' + arrSub + '</div>' : '') + '</div></div>' +
-      chip(first.status, first.delay, first.live);
+      statusRow(first, toL);
     h += between;
     if (second) {
       var st2 = second.status === 'late' ? '<span class="small late">' + (second.delay ? '+' + second.delay + ' min' : 'Delayed') + '</span>' : '<span class="small">' + (second.live ? 'On time' : 'Timetable') + '</span>';
-      h += '<div class="next"><span>Then <b class="num">' + C.fmt(second.dep) + '</b>' + (second.dest && !toL ? ' to ' + esc(second.dest) : '') + ' · arrives ' + (second.arr != null ? C.fmt(second.arr) : '–') + '</span>' + st2 + '</div>';
+      h += '<div class="next"><span>Then <b class="num">' + C.fmt(second.dep) + '</b>' + (second.dest && !toL ? ' to ' + esc(second.dest) : '') + (!toL && second.platform ? ' · Platform ' + esc(second.platform) : '') + ' · arrives ' + (second.arr != null ? C.fmt(second.arr) : '–') + '</span>' + st2 + '</div>';
     }
     return h + '</section>';
   }
@@ -223,7 +235,8 @@
       var to = C.NAME[r.last] || '';
       var skip = r.type === 'normal' ? '' : '<span class="small">' + esc(C.describeSkips(r.skipped)) + '</span>';
       var st = r.live ? (r.delay > 0 ? '<div class="small late">+' + r.delay + ' min</div>' : '<div class="small">On time</div>') : '<div class="small">Timetable</div>';
-      body += '<div class="tube"><div class="t num">' + C.fmt(r.dep) + '</div><div class="m"><span class="ty ' + r.type + '">' + TYPE_LABEL[r.type] + '</span>' +
+      var plat = !toL && r.platform ? '<div class="small" style="font-weight:600;color:#14161A">Platform ' + esc(r.platform) + '</div>' : '';
+      body += '<div class="tube"><div class="tc"><div class="t num">' + C.fmt(r.dep) + '</div>' + plat + '</div><div class="m"><span class="ty ' + r.type + '">' + TYPE_LABEL[r.type] + '</span>' +
         (to ? '<span class="sub" style="margin:0">to ' + esc(to) + '</span>' : '') + skip + '</div>' +
         '<div class="r"><div class="lbl">' + (toL ? 'Baker St' : 'Chorleywood') + '</div><div class="a num">' + C.fmt(r.arr) + '</div>' + st + '</div></div>';
     });
@@ -246,7 +259,7 @@
     var toL = dir === 'london', k = toL ? 'toLondon' : 'toChorley';
     var tt = store.tfl && (toL ? store.tfl.out : store.tfl.back);
     var tl = toL ? S.live.cyd : S.live.bst, cl = S.live[k];
-    var preds = fresh(tl) ? tl.ms.map(function (m) { return (m - now.midnightMs) / 60000; }) : null;
+    var preds = fresh(tl) ? tl.preds.map(function (p) { return { m: (p.t - now.midnightMs) / 60000, platform: p.platform }; }) : null;
     var tubes = tt ? C.nextTubes(tt, now, preds, 3) : [];
     var chT = store.chiltern[k] ? C.flattenDays(store.chiltern[k].days) : [];
     var chRows = C.chilternNext(chT, fresh(cl) ? cl.rows : null, now, 2);
@@ -272,7 +285,7 @@
     L.push('now (London): ' + C.londonNow(Date.now()).date + ' ' + C.fmt(C.londonNow(Date.now()).minutes) + ' · online: ' + navigator.onLine);
     ['cyd', 'bst', 'toLondon', 'toChorley'].forEach(function (k) {
       var x = S.live[k];
-      L.push('live ' + k + ': ' + (!x ? 'not tried' : x.ok ? 'ok, ' + (x.ms ? x.ms.length + ' of ' + x.raw + ' predictions kept' : x.rows.length + ' services') : 'FAILED ' + x.err));
+      L.push('live ' + k + ': ' + (!x ? 'not tried' : x.ok ? 'ok, ' + (x.ms ? x.ms.length + ' of ' + x.raw + ' predictions kept; platforms seen: ' + (x.plats.join(' | ') || 'none') : x.rows.length + ' services; platforms: ' + (x.rows.map(function (r) { return r.platform || '-'; }).join(',') || 'none')) : 'FAILED ' + x.err));
     });
     if (store.tfl && store.tfl.out) {
       [['to Baker Street', store.tfl.out], ['to Chorleywood', store.tfl.back]].forEach(function (p) {

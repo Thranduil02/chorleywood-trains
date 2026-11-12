@@ -172,25 +172,26 @@
 
   // Order-preserving match of live predictions (minutes) to scheduled departures.
   function matchLive(cands, preds) {
-    var p = preds.slice().sort(function (a, b) { return a - b; });
+    var p = preds.map(function (x) { return typeof x === 'number' ? { m: x, platform: null } : x; })
+      .sort(function (a, b) { return a.m - b.m; });
     var usedP = {}, i, j;
     // pass 1: near-exact matches
     cands.forEach(function (c) {
       var best = -1, bd = 1e9;
       for (j = 0; j < p.length; j++) {
         if (usedP[j]) continue;
-        var d = Math.abs(p[j] - c.sched);
+        var d = Math.abs(p[j].m - c.sched);
         if (d <= 1.5 && d < bd) { bd = d; best = j; }
       }
-      if (best >= 0) { usedP[best] = true; c.liveDep = p[best]; }
+      if (best >= 0) { usedP[best] = true; c.liveDep = p[best].m; c.platform = p[best].platform; }
     });
     // pass 2: delayed trains, order preserving, only trains not yet due
     var rc = cands.filter(function (c) { return c.liveDep == null; });
     var rp = p.filter(function (v, k) { return !usedP[k]; });
     i = 0; j = 0;
     while (i < rc.length && j < rp.length) {
-      var d2 = rp[j] - rc[i].sched;
-      if (d2 >= -2 && d2 <= 20) { rc[i].liveDep = rp[j]; i++; j++; }
+      var d2 = rp[j].m - rc[i].sched;
+      if (d2 >= -2 && d2 <= 20) { rc[i].liveDep = rp[j].m; rc[i].platform = rp[j].platform; i++; j++; }
       else if (d2 < -2) j++;
       else i++;
     }
@@ -218,9 +219,10 @@
       if (a.lineId !== 'metropolitan') return;
       if (filterFn && !filterFn(a)) return;
       var t = Date.parse(a.expectedArrival);
-      if (!isNaN(t)) out.push(t);
+      var pm = /platform\s*([0-9]+[a-z]?)/i.exec(a.platformName || '');
+      if (!isNaN(t)) out.push({ t: t, platform: pm ? pm[1] : null, raw: a.platformName || '' });
     });
-    return out.sort(function (a, b) { return a - b; });
+    return out.sort(function (a, b) { return a.t - b.t; });
   }
 
   /* ---------- Chiltern ---------- */

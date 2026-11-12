@@ -259,7 +259,7 @@
   }
 
   function footLink() {
-    return '<a class="link" href="#data"><span>Data and Sync Status</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></a>';
+    return '<a class="link" href="#data"><span>Data &amp; Sync Status</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></a>';
   }
 
   function viewMain(dir) {
@@ -281,7 +281,7 @@
       banner + chilternCard(chRows, toL, chT.length > 0, S.syncing) + tubeCard(tubes, toL, !!tt, S.syncing) + footLink();
   }
 
-  var STATUS = { new: ['Stored', 'ok'], same: ['Matches', 'ok'], updated: ['Updated', 'late'], error: ['Check failed', 'late'], none: ['Not stored', 'late'] };
+  var STATUS = { new: ['Stored', 'good'], same: ['Matches', 'good'], updated: ['Updated', 'good'], error: ['Check failed', 'bad'], none: ['Not stored', 'bad'] };
   function sp(s) { var x = STATUS[s || 'none'] || STATUS.none; return '<span class="chip ' + x[1] + '" style="white-space:nowrap">' + x[0] + '</span>'; }
   function liveRow(name, xs, extra) {
     var ok = xs.every(fresh);
@@ -323,7 +323,7 @@
     var t = store.tfl || {}, c = store.chiltern || {};
     var nDays = c.toLondon ? Object.keys(c.toLondon.days).length : 0;
     return '<a class="back" href="#' + store.settings.tab + '"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>Back</a>' +
-      '<h1>Data and sync</h1>' +
+      '<h1 class="serif">Data &amp; Sync Status</h1>' +
       '<section class="list" aria-label="Live feeds"><h2>Live feeds</h2>' +
       liveRow('TfL', [S.live.cyd, S.live.bst], S.live.cyd && S.live.bst && S.live.cyd.ok && S.live.bst.ok ? (S.live.cyd.ms.length + S.live.bst.ms.length) + ' trains tracked' : '') +
       liveRow('Chiltern Railways', [S.live.toLondon, S.live.toChorley]) + '</section>' +

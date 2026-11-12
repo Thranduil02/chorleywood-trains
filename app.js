@@ -5,6 +5,7 @@
   var TFL = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://huxley2.azurewebsites.net';
   var KEY = 'trains.store.v1';
+  var BUILD = 'v13';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 1600; // TfL allows roughly 50 anonymous requests a minute
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -173,7 +174,10 @@
       if (shiftMs) preds.forEach(function (p) { p.t += shiftMs; }); // Baker Street: arrival time plus about a minute's dwell approximates departure
       var plats = {};
       preds.forEach(function (p) { plats[p.raw || '(none)'] = true; });
-      S.live[slot] = { ok: true, at: Date.now(), preds: preds, ms: preds.map(function (p) { return p.t; }), plats: Object.keys(plats), raw: (j || []).length };
+      var sample = (j || []).filter(function (a) { return a.lineId === 'metropolitan'; }).slice(0, 12).map(function (a) {
+        return (filter(a) ? '* ' : '- ') + (a.destinationName || '?') + ' | ' + (a.towards || '?') + ' | ' + (a.platformName || '?') + ' | ' + (a.direction || '?') + ' | ' + C.fmt(C.londonNow(Date.parse(a.expectedArrival)).minutes) + ' | veh ' + (a.vehicleId || '?');
+      });
+      S.live[slot] = { ok: true, at: Date.now(), preds: preds, ms: preds.map(function (p) { return p.t; }), plats: Object.keys(plats), raw: (j || []).length, sample: sample };
     }).catch(function (e) {
       if (/HTTP 429/.test(errText(e))) S.backoffUntil = Date.now() + 60000;
       var prev = S.live[slot];
@@ -318,10 +322,14 @@
   }
   function diagnostics() {
     var L = [];
+    L.push('build ' + BUILD);
     L.push('now (London): ' + C.londonNow(Date.now()).date + ' ' + C.fmt(C.londonNow(Date.now()).minutes) + ' · online: ' + navigator.onLine);
     ['cyd', 'bst', 'toLondon', 'toChorley'].forEach(function (k) {
       var x = S.live[k];
       L.push('live ' + k + ': ' + (!x ? 'not tried' : x.ok ? 'ok, ' + (x.ms ? x.ms.length + ' of ' + x.raw + ' predictions kept; platforms seen: ' + (x.plats.join(' | ') || 'none') : x.rows.length + ' services; platforms: ' + (x.rows.map(function (r) { return r.platform || '-'; }).join(',') || 'none')) : 'FAILED ' + x.err));
+    });
+    ['cyd', 'bst'].forEach(function (k) {
+      var x = S.live[k]; if (x && x.sample && x.sample.length) L.push('\nraw Metropolitan arrivals ' + k + ' (* kept, - dropped)\n' + x.sample.join('\n'));
     });
     if (store.tfl && store.tfl.out) {
       [['to Baker Street', store.tfl.out], ['to Chorleywood', store.tfl.back]].forEach(function (p) {

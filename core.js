@@ -226,12 +226,10 @@
     var seen = {}; // TfL can list one vehicle twice with different platforms: keep its earliest prediction
     return out.filter(function (x) { if (!x.vid) return true; if (seen[x.vid]) return false; seen[x.vid] = true; return true; });
   }
-  // Baker Street: trains for Chorleywood leave on the northbound platforms. TfL labels their destination
-  // inconsistently (Amersham, Chesham, "Baker Street", or blank), so exclude the branches that miss Chorleywood instead.
+  // Baker Street: only trust a prediction once TfL has labelled it Amersham or Chesham. Unlabelled and "Baker Street"
+  // predictions turn out to be Uxbridge, Watford or terminating trains (vehicle 433 was blank 26 minutes out, then Uxbridge).
   function bakerStreetToChorleywood(a) {
-    var d = (a.destinationName || '') + ' ' + (a.towards || '');
-    if (/watford|uxbridge|aldgate/i.test(d)) return false;
-    return /^northbound/i.test(a.platformName || '') || /amersham|chesham/i.test(d);
+    return /amersham|chesham/i.test((a.destinationName || '') + ' ' + (a.towards || ''));
   }
 
   /* ---------- Chiltern ---------- */

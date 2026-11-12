@@ -5,6 +5,7 @@
   var TFL = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://huxley2.azurewebsites.net';
   var KEY = 'trains.store.v1';
+  var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 1600; // TfL allows roughly 50 anonymous requests a minute
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
   var LIVE_EVERY_MS = 30000;
@@ -77,10 +78,10 @@
           var m = /HTTP (\d+)/.exec((e && e.message) || '');
           if (m && m[1] === '404') return { journeys: [] }; // "no journey found" is an empty result, not a failure
           if (++tries > 3) throw e;
-          return sleep(tries * 1500).then(go);
+          return sleep(m && m[1] === '429' ? Math.max(30000 * (window.__JP_GAP_MS === 0 ? 0 : 1), 0) : tries * 1500).then(go); // rate limited: wait for the minute window to reset
         });
       }
-      return go().then(function (j) { return sleep(150).then(function () { return j; }); });
+      return go().then(function (j) { return sleep(JP_GAP_MS).then(function () { return j; }); });
     }
     var stale = false, changed = false, isNew = false;
     var step = Promise.resolve();
@@ -103,6 +104,7 @@
               var h = C.hash(JSON.stringify(trains));
               if (!day) isNew = true; else if (day.hash !== h) changed = true;
               rec.days[date] = { fetchedAt: Date.now(), hash: h, trains: trains };
+              save(); // keep progress if iOS suspends the app mid-sync
               log('Chiltern ' + d.k + ' ' + date + ': ' + trains.length + ' trains' + (day ? (day.hash === h ? ' (unchanged)' : ' (CHANGED)') : ''));
             }).catch(function (e) {
               // keep an older stored copy of a future day rather than failing the whole check

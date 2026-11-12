@@ -2,10 +2,10 @@
 (function () {
   'use strict';
   var C = window.Core, ID = C.ID;
-  var TFL = 'https://api.tfl.gov.uk';
+  var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v20';
+  var BUILD = 'v21';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 1600; // TfL allows roughly 50 anonymous requests a minute
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -56,12 +56,16 @@
     }).finally(function () { clearTimeout(to); });
   }
   function errText(e) { return e && e.name === 'AbortError' ? 'timed out' : (e && e.message) || String(e); }
+  // TfL calls go through the Worker (one shared key, short cache); if it can't answer, ask TfL directly.
+  function tflJson(path, ms) {
+    return getJson(DEFAULT_BASE + '/tfl' + path, ms).catch(function () { return getJson(TFL_DIRECT + path, ms); });
+  }
   function countJ(tt) { return tt.schedules.reduce(function (n, s) { return n + s.j.length; }, 0); }
 
   /* ---------- timetable sync ---------- */
   function syncTfl() {
-    var base = TFL + '/Line/metropolitan/Timetable/';
-    return Promise.all([getJson(base + ID.CYD + '/to/' + ID.BST, 20000), getJson(base + ID.BST + '/to/' + ID.CYD, 20000)]).then(function (r) {
+    var base = '/Line/metropolitan/Timetable/';
+    return Promise.all([tflJson(base + ID.CYD + '/to/' + ID.BST, 20000), tflJson(base + ID.BST + '/to/' + ID.CYD, 20000)]).then(function (r) {
       var out = C.parseTimetable(r[0], ID.BST), back = C.parseTimetable(r[1], ID.CYD);
       if (!countJ(out) || !countJ(back)) throw new Error('timetable had no usable trains (' + countJ(out) + '/' + countJ(back) + ')');
       var h = C.hash(JSON.stringify([out, back]));
@@ -72,7 +76,7 @@
       };
       log('TfL timetable ' + status + ' (' + countJ(out) + ' + ' + countJ(back) + ' journeys)');
       // Uxbridge and Watford departures from Baker Street, used only to tell unlabelled live predictions apart
-      return Promise.all([getJson(base + ID.BST + '/to/' + ID.UXB, 20000), getJson(base + ID.BST + '/to/' + ID.WAF, 20000)]).then(function (o) {
+      return Promise.all([tflJson(base + ID.BST + '/to/' + ID.UXB, 20000), tflJson(base + ID.BST + '/to/' + ID.WAF, 20000)]).then(function (o) {
         store.tfl.others = { U: C.parseBranch(o[0], ID.UXB), W: C.parseBranch(o[1], ID.WAF), at: Date.now() };
         log('Other branches stored (Uxbridge ' + store.tfl.others.U.reduce(function (n, x) { return n + x.d.length; }, 0) + ', Watford ' + store.tfl.others.W.reduce(function (n, x) { return n + x.d.length; }, 0) + ' departures)');
       }).catch(function (e) { log('Other branches failed: ' + errText(e)); });
@@ -87,10 +91,10 @@
     var rec = store.chiltern[d.k] = store.chiltern[d.k] || { days: {} };
     Object.keys(rec.days).forEach(function (k) { if (k < C.dateAdd(today.date, -1)) delete rec.days[k]; });
     function getJ(ymd, hhmm) {
-      var url = TFL + '/Journey/JourneyResults/' + d.from + '/to/' + d.to + '?mode=national-rail&date=' + ymd + '&time=' + hhmm + '&timeIs=Departing';
+      var url = '/Journey/JourneyResults/' + d.from + '/to/' + d.to + '?mode=national-rail&date=' + ymd + '&time=' + hhmm + '&timeIs=Departing';
       var tries = 0;
       function go() {
-        return getJson(url, 15000).catch(function (e) {
+        return tflJson(url, 15000).catch(function (e) {
           var m = /HTTP (\d+)/.exec((e && e.message) || '');
           if (m && m[1] === '404') return { journeys: [] }; // "no journey found" is an empty result, not a failure
           if (++tries > 3) throw e;
@@ -174,7 +178,7 @@
 
   /* ---------- live data ---------- */
   function liveTube(slot, stopId, filter, shiftMs) {
-    return getJson(TFL + '/StopPoint/' + stopId + '/Arrivals', 10000).then(function (j) {
+    return tflJson('/StopPoint/' + stopId + '/Arrivals', 10000).then(function (j) {
       var preds = C.parseArrivals(j, filter);
       if (shiftMs) preds.forEach(function (p) { p.t += shiftMs; }); // Baker Street: arrival time plus about a minute's dwell approximates departure
       var plats = {};

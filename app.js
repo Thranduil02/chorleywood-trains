@@ -156,6 +156,10 @@
 
   function syncAll(force) {
     if (S.syncing) return Promise.resolve();
+    // TfL's anonymous limit is about 50 requests a minute, so don't re-run the whole check on every reload
+    var gap = store.tfl && store.tfl.out ? 10 * 60000 : 60000;
+    if (!force && store.syncTryAt && Date.now() - store.syncTryAt < gap) return Promise.resolve();
+    store.syncTryAt = Date.now(); save();
     S.syncing = true; render();
     return syncTfl().then(function () { save(); render(); return syncChiltern(!!force); }).then(function () {
       save();
@@ -170,7 +174,12 @@
       var plats = {};
       preds.forEach(function (p) { plats[p.raw || '(none)'] = true; });
       S.live[slot] = { ok: true, at: Date.now(), preds: preds, ms: preds.map(function (p) { return p.t; }), plats: Object.keys(plats), raw: (j || []).length };
-    }).catch(function (e) { S.live[slot] = { ok: false, at: Date.now(), err: errText(e) }; });
+    }).catch(function (e) {
+      if (/HTTP 429/.test(errText(e))) S.backoffUntil = Date.now() + 60000;
+      var prev = S.live[slot];
+      // keep the last good reading (it goes stale by itself after 2.5 minutes) instead of dropping platforms on one failed fetch
+      S.live[slot] = prev && prev.ok ? Object.assign({}, prev, { lastErr: errText(e) }) : { ok: false, at: Date.now(), err: errText(e) };
+    });
   }
   function liveChiltern(slot, from, to, manual) {
     var prev = S.live[slot];
@@ -183,6 +192,7 @@
     }).catch(function (e) { S.live[slot] = { ok: false, at: Date.now(), err: errText(e) }; });
   }
   function refreshLive(manual) {
+    if (!manual && S.backoffUntil && Date.now() < S.backoffUntil) return Promise.resolve(); // rate limited: wait out the minute
     S.liveTried = true;
     return Promise.all([
       liveTube('cyd', ID.CYD, function (a) { return /southbound/i.test(a.platformName || '') || a.direction === 'outbound'; }),
@@ -395,7 +405,7 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') { render(); if (navigator.onLine !== false) refreshLive(false); }
   });
-  window.addEventListener('online', function () { syncAll(false); refreshLive(true); });
+  window.addEventListener('online', function () { syncAll(false); refreshLive(false); });
   window.addEventListener('offline', render);
   setInterval(function () { if (document.visibilityState === 'visible') { render(); } }, 20000);
   setInterval(function () { if (document.visibilityState === 'visible' && navigator.onLine !== false) refreshLive(false); }, LIVE_EVERY_MS);

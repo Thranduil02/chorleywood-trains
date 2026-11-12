@@ -5,7 +5,7 @@
   var TFL = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v17';
+  var BUILD = 'v18';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 1600; // TfL allows roughly 50 anonymous requests a minute
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -68,9 +68,14 @@
       var prev = store.tfl, status = !prev || !prev.hash ? 'new' : (prev.hash === h ? 'same' : 'updated');
       store.tfl = {
         out: out, back: back, hash: h, fetchedAt: Date.now(), checkedAt: Date.now(), status: status, error: null,
-        changedAt: status === 'same' ? prev.changedAt : Date.now()
+        changedAt: status === 'same' ? prev.changedAt : Date.now(), others: prev && prev.others
       };
       log('TfL timetable ' + status + ' (' + countJ(out) + ' + ' + countJ(back) + ' journeys)');
+      // Uxbridge and Watford departures from Baker Street, used only to tell unlabelled live predictions apart
+      return Promise.all([getJson(base + ID.BST + '/to/' + ID.UXB, 20000), getJson(base + ID.BST + '/to/' + ID.WAF, 20000)]).then(function (o) {
+        store.tfl.others = { U: C.parseBranch(o[0], ID.UXB), W: C.parseBranch(o[1], ID.WAF), at: Date.now() };
+        log('Other branches stored (Uxbridge ' + store.tfl.others.U.reduce(function (n, x) { return n + x.d.length; }, 0) + ', Watford ' + store.tfl.others.W.reduce(function (n, x) { return n + x.d.length; }, 0) + ' departures)');
+      }).catch(function (e) { log('Other branches failed: ' + errText(e)); });
     }).catch(function (e) {
       store.tfl = store.tfl || {};
       store.tfl.error = errText(e); store.tfl.status = store.tfl.out ? 'error' : 'none';
@@ -203,7 +208,7 @@
     S.liveTried = true;
     return Promise.all([
       liveTube('cyd', ID.CYD, function (a) { return /southbound/i.test(a.platformName || '') || a.direction === 'outbound'; }),
-      liveTube('bst', ID.BST, C.bakerStreetToChorleywood, 60000),
+      liveTube('bst', ID.BST, C.bakerStreetNorthbound, 60000),
       liveChiltern('toLondon', 'CLW', 'MYB', manual),
       liveChiltern('toChorley', 'MYB', 'CLW', manual)
     ]).then(function () { saveLive(); render(); });
@@ -296,8 +301,11 @@
     var toL = dir === 'london', k = toL ? 'toLondon' : 'toChorley';
     var tt = store.tfl && (toL ? store.tfl.out : store.tfl.back);
     var tl = toL ? S.live.cyd : S.live.bst, cl = S.live[k];
-    var preds = fresh(tl) ? tl.preds.map(function (p) { return { m: (p.t - now.midnightMs) / 60000, platform: p.platform }; }) : null;
-    var tubes = tt ? C.nextTubes(tt, now, preds, 3) : [];
+    var oth = !toL && store.tfl && store.tfl.others;
+    var others = oth ? { U: C.branchNear(oth.U, now, 360), W: C.branchNear(oth.W, now, 360) } : null;
+    var preds = fresh(tl) ? tl.preds.filter(function (p) { return toL || others || p.cls === 'C'; }) // without the other branches, trust only labelled trains
+      .map(function (p) { return { m: (p.t - now.midnightMs) / 60000, platform: p.platform, cls: p.cls || null }; }) : null;
+    var tubes = tt ? C.nextTubes(tt, now, preds, 3, toL ? null : others) : [];
     var chT = store.chiltern[k] ? C.flattenDays(store.chiltern[k].days) : [];
     var chRows = C.chilternNext(chT, fresh(cl) ? cl.rows : null, now, 2);
     var banner = '';
@@ -334,6 +342,8 @@
     ['cyd', 'bst'].forEach(function (k) {
       var x = S.live[k]; if (x && x.sample && x.sample.length) L.push('\nraw Metropolitan arrivals ' + k + ' (* kept, - dropped)\n' + x.sample.join('\n'));
     });
+    if (store.tfl && store.tfl.others) L.push('\nOther branches stored: Uxbridge ' + store.tfl.others.U.reduce(function (n, x) { return n + x.d.length; }, 0) + ' departures, Watford ' + store.tfl.others.W.reduce(function (n, x) { return n + x.d.length; }, 0));
+    else L.push('\nOther branches: not stored yet');
     if (store.tfl && store.tfl.out) {
       [['to Baker Street', store.tfl.out], ['to Chorleywood', store.tfl.back]].forEach(function (p) {
         L.push('\nTfL patterns ' + p[0] + ' (' + countJ(p[1]) + ' journeys; schedules: ' + p[1].schedules.map(function (s) { return s.name + ' [' + s.days.join(',') + ']'; }).join(' | ') + ')');

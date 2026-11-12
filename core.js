@@ -6,7 +6,7 @@
   'use strict';
 
   var ID = {
-    CYD: '940GZZLUCYD', BST: '940GZZLUBST',
+    CYD: '940GZZLUCYD', BST: '940GZZLUBST', UXB: '940GZZLUUXB', WAF: '940GZZLUWAF',
     CLW_RAIL: '910GCHRW', MYB_RAIL: '910GMARYLBN'
   };
 
@@ -197,10 +197,14 @@
     }
   }
 
-  function nextTubes(tt, now, predMinutes, count) {
+  function nextTubes(tt, now, predMinutes, count, others) {
     var cands = tubeCandidates(tt, now, 360);
     var haveLive = !!(predMinutes && predMinutes.length);
-    if (haveLive) matchLive(cands.filter(function (c) { return c.sched >= now.minutes - 3; }), predMinutes);
+    if (haveLive) {
+      var open = cands.filter(function (c) { return c.sched >= now.minutes - 3; });
+      if (others) matchNorthbound(open, others, predMinutes.map(function (x) { return typeof x === 'number' ? { m: x, platform: null, cls: null } : x; }));
+      else matchLive(open, predMinutes);
+    }
     cands.forEach(function (c) {
       if (c.liveDep != null) {
         c.live = true;
@@ -213,6 +217,15 @@
       .sort(function (a, b) { return a.dep - b.dep; }).slice(0, count);
   }
 
+  // Which branch a prediction's label points to: C = Amersham/Chesham (calls at Chorleywood), U = Uxbridge, W = Watford,
+  // null = not labelled yet ("Check Front of Train", blank, or "Baker Street" for a train that turns round there).
+  function branchOf(a) {
+    var d = (a.destinationName || '') + ' ' + (a.towards || '');
+    if (/amersham|chesham/i.test(d)) return 'C';
+    if (/uxbridge/i.test(d)) return 'U';
+    if (/watford/i.test(d)) return 'W';
+    return null;
+  }
   function parseArrivals(json, filterFn) {
     var out = [];
     (json || []).forEach(function (a) {
@@ -220,16 +233,70 @@
       if (filterFn && !filterFn(a)) return;
       var t = Date.parse(a.expectedArrival);
       var pm = /platform\s*([0-9]+[a-z]?)/i.exec(a.platformName || '');
-      if (!isNaN(t)) out.push({ t: t, platform: pm ? pm[1] : null, raw: a.platformName || '', vid: a.vehicleId || null });
+      if (!isNaN(t)) out.push({ t: t, platform: pm ? pm[1] : null, raw: a.platformName || '', cls: branchOf(a) });
     });
-    out.sort(function (a, b) { return a.t - b.t; });
-    var seen = {}; // TfL can list one vehicle twice with different platforms: keep its earliest prediction
-    return out.filter(function (x) { if (!x.vid) return true; if (seen[x.vid]) return false; seen[x.vid] = true; return true; });
+    return out.sort(function (a, b) { return a.t - b.t; });
   }
-  // Baker Street: only trust a prediction once TfL has labelled it Amersham or Chesham. Unlabelled and "Baker Street"
-  // predictions turn out to be Uxbridge, Watford or terminating trains (vehicle 433 was blank 26 minutes out, then Uxbridge).
-  function bakerStreetToChorleywood(a) {
-    return /amersham|chesham/i.test((a.destinationName || '') + ' ' + (a.towards || ''));
+  // Baker Street, northbound platforms: everything that leaves towards Amersham/Chesham, Watford or Uxbridge.
+  function bakerStreetNorthbound(a) {
+    var d = (a.destinationName || '') + ' ' + (a.towards || '');
+    if (/aldgate/i.test(d) || a.direction === 'outbound') return false;
+    return /^northbound/i.test(a.platformName || '') || branchOf(a) !== null;
+  }
+
+  // Scheduled Baker Street departures towards another branch, kept only so unlabelled predictions can be
+  // told apart from Chorleywood trains by elimination.
+  function parseBranch(json, destStopId) {
+    return parseTimetable(json, destStopId).schedules.map(function (s) {
+      return { days: s.days, d: s.j.map(function (x) { return x[0]; }) };
+    });
+  }
+  function branchNear(sched, now, horizon) {
+    var res = [];
+    [-1, 0].forEach(function (shift) {
+      var dow = (now.dow + 7 + shift) % 7;
+      (sched || []).forEach(function (s) {
+        if (s.days.indexOf(dow) < 0) return;
+        s.d.forEach(function (dep) {
+          var abs = (dep < 180 ? dep + 1440 : dep) + shift * 1440;
+          if (abs < now.minutes - 15 || abs > now.minutes + horizon) return;
+          res.push(abs);
+        });
+      });
+    });
+    return res;
+  }
+  // Pair live Baker Street predictions with scheduled departures of every branch, closest first, so a blank
+  // prediction goes to whichever scheduled train it sits nearest. Only Chorleywood trains keep their pairing.
+  function matchNorthbound(cands, others, preds) {
+    var TOL = 2.5, i, j;
+    var trains = cands.map(function (c) { return { t: c.sched, cls: 'C', c: c }; });
+    (others.U || []).forEach(function (m) { trains.push({ t: m, cls: 'U' }); });
+    (others.W || []).forEach(function (m) { trains.push({ t: m, cls: 'W' }); });
+    var pairs = [];
+    for (i = 0; i < preds.length; i++) for (j = 0; j < trains.length; j++) {
+      if (preds[i].cls && preds[i].cls !== trains[j].cls) continue;
+      var d = Math.abs(preds[i].m - trains[j].t);
+      if (d <= TOL) pairs.push({ i: i, j: j, d: d });
+    }
+    pairs.sort(function (a, b) { return a.d - b.d; });
+    var usedP = {}, usedT = {};
+    pairs.forEach(function (x) {
+      if (usedP[x.i] || usedT[x.j]) return;
+      usedP[x.i] = usedT[x.j] = true;
+      var tr = trains[x.j];
+      if (tr.c) { tr.c.liveDep = preds[x.i].m; tr.c.platform = preds[x.i].platform; }
+    });
+    // later-running trains that TfL has labelled Amersham/Chesham: order-preserving, up to 20 minutes late
+    var rc = cands.filter(function (c) { return c.liveDep == null; });
+    var rp = preds.filter(function (p, k) { return !usedP[k] && p.cls === 'C'; }).sort(function (a, b) { return a.m - b.m; });
+    i = 0; j = 0;
+    while (i < rc.length && j < rp.length) {
+      var d2 = rp[j].m - rc[i].sched;
+      if (d2 >= -2 && d2 <= 20) { rc[i].liveDep = rp[j].m; rc[i].platform = rp[j].platform; i++; j++; }
+      else if (d2 < -2) j++;
+      else i++;
+    }
   }
 
   /* ---------- Chiltern ---------- */
@@ -378,7 +445,7 @@
     pad: pad, hm: hm, fmt: fmt, hash: hash, dateAdd: dateAdd, dayDiff: dayDiff, absFromLocal: absFromLocal,
     londonNow: londonNow, classify: classify, describeSkips: describeSkips, parseDays: parseDays,
     parseTimetable: parseTimetable, tubeCandidates: tubeCandidates, matchLive: matchLive, nextTubes: nextTubes,
-    parseArrivals: parseArrivals, bakerStreetToChorleywood: bakerStreetToChorleywood, parseJourneys: parseJourneys, buildDay: buildDay, flattenDays: flattenDays,
+    parseArrivals: parseArrivals, bakerStreetNorthbound: bakerStreetNorthbound, branchOf: branchOf, parseBranch: parseBranch, branchNear: branchNear, matchNorthbound: matchNorthbound, parseJourneys: parseJourneys, buildDay: buildDay, flattenDays: flattenDays,
     windowMatches: windowMatches, parseDarwin: parseDarwin, liveBoardRequest: liveBoardRequest, chilternNext: chilternNext
   };
 });

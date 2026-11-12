@@ -321,6 +321,18 @@
     return out;
   }
 
+  // Where to fetch a Chiltern live board from, depending on what the "service address" setting points at.
+  function liveBoardRequest(base, token, from, to) {
+    base = String(base || '').replace(/\/+$/, '');
+    if (/raildata\.org\.uk/i.test(base)) {
+      return { needsKey: true, headers: { 'x-apikey': token }, url: base + '/GetDepBoardWithDetails/' + from + '?filterCRS=' + to + '&filterType=to&numRows=8' };
+    }
+    if (/huxley/i.test(base)) { // older OpenLDBWS proxy
+      return { needsKey: true, headers: null, url: base + '/departures/' + from + '/to/' + to + '/8?expand=true&accessToken=' + encodeURIComponent(token) };
+    }
+    return { needsKey: false, headers: null, url: base + '/board/' + from + '/' + to }; // your own proxy holds the key
+  }
+
   function wrap(x, ref) { return x < ref - 30 ? x + 1440 : x; }
 
   function chilternNext(trains, live, now, count) {
@@ -367,6 +379,6 @@
     londonNow: londonNow, classify: classify, describeSkips: describeSkips, parseDays: parseDays,
     parseTimetable: parseTimetable, tubeCandidates: tubeCandidates, matchLive: matchLive, nextTubes: nextTubes,
     parseArrivals: parseArrivals, bakerStreetToChorleywood: bakerStreetToChorleywood, parseJourneys: parseJourneys, buildDay: buildDay, flattenDays: flattenDays,
-    windowMatches: windowMatches, parseDarwin: parseDarwin, chilternNext: chilternNext
+    windowMatches: windowMatches, parseDarwin: parseDarwin, liveBoardRequest: liveBoardRequest, chilternNext: chilternNext
   };
 });

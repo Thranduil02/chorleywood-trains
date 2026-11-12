@@ -389,6 +389,17 @@
     return out;
   }
 
+  // National Rail messages on a board (strikes, disruption) -> plain-text strings.
+  function parseNotices(json) {
+    var out = [];
+    ((json && json.nrccMessages) || []).forEach(function (m) {
+      var t = typeof m === 'string' ? m : (m && (m.value || m.xhtmlMessage || m.message || m.text)) || '';
+      t = String(t).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/\s+/g, ' ').trim();
+      if (t && out.indexOf(t) < 0) out.push(t.length > 280 ? t.slice(0, 277) + '...' : t);
+    });
+    return out;
+  }
+
   // Where to fetch a Chiltern live board from, depending on what the "service address" setting points at.
   function liveBoardRequest(base, token, from, to) {
     base = String(base || '').replace(/\/+$/, '');
@@ -447,6 +458,6 @@
     londonNow: londonNow, classify: classify, describeSkips: describeSkips, parseDays: parseDays,
     parseTimetable: parseTimetable, tubeCandidates: tubeCandidates, matchLive: matchLive, nextTubes: nextTubes,
     parseArrivals: parseArrivals, bakerStreetNorthbound: bakerStreetNorthbound, branchOf: branchOf, parseBranch: parseBranch, branchNear: branchNear, matchNorthbound: matchNorthbound, parseJourneys: parseJourneys, buildDay: buildDay, flattenDays: flattenDays,
-    windowMatches: windowMatches, parseDarwin: parseDarwin, liveBoardRequest: liveBoardRequest, chilternNext: chilternNext
+    windowMatches: windowMatches, parseDarwin: parseDarwin, parseNotices: parseNotices, liveBoardRequest: liveBoardRequest, chilternNext: chilternNext
   };
 });

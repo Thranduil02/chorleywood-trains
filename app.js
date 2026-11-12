@@ -5,7 +5,7 @@
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v22';
+  var BUILD = 'v23';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -199,7 +199,7 @@
     var rq = C.liveBoardRequest(DEFAULT_BASE, '', from, to); // the built-in Worker holds the key
     if (!manual && prev && !prev.ok && Date.now() - prev.at < 300000) return Promise.resolve(); // back off after a failure
     return getJson(rq.url, 10000, rq.headers).then(function (j) {
-      S.live[slot] = { ok: true, at: Date.now(), rows: C.parseDarwin(j, to), raw: (j.trainServices || []).length };
+      S.live[slot] = { ok: true, at: Date.now(), rows: C.parseDarwin(j, to), notices: C.parseNotices(j), raw: (j.trainServices || []).length };
     }).catch(function (e) {
       var m = errText(e);
       S.live[slot] = { ok: false, at: Date.now(), err: /HTTP (401|403)/.test(m) ? 'Key rejected (' + m + ')' : m };
@@ -245,11 +245,11 @@
     return c1 || pc ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' + c1 + pc + '</div>' : '';
   }
 
-  function chilternCard(rows, toL, haveTT, syncing) {
+  function chilternCard(rows, toL, haveTT, syncing, noServiceToday) {
     var head = '<div class="row"><span class="tag ch">Chiltern Railways</span><span class="sub" style="margin:0">' + (toL ? 'to Marylebone' : 'to Chorleywood') + '</span></div>';
     var good = rows.filter(function (r) { return r.status !== 'cancelled'; });
     if (!good.length) {
-      var msg = !haveTT ? (syncing ? 'Fetching the Chiltern timetable…' : 'No Chiltern timetable stored yet. Open the app once with a connection.') : 'No more Chiltern trains in the stored timetable.';
+      var msg = !haveTT ? (syncing ? 'Fetching the Chiltern timetable…' : 'No Chiltern timetable stored yet. Open the app once with a connection.') : (noServiceToday ? 'No Chiltern service found for today.' : 'No more Chiltern trains in the stored timetable.');
       var canc = rows.map(function (r) { return '<div class="small late">' + C.fmt(r.sched) + ' cancelled</div>'; }).join('');
       return '<section class="card" aria-label="Next Chiltern train">' + head + canc + '<div class="empty">' + msg + '</div></section>';
     }
@@ -310,13 +310,20 @@
     var tubes = tt ? C.nextTubes(tt, now, preds, 3, toL ? null : others) : [];
     var chT = store.chiltern[k] ? C.flattenDays(store.chiltern[k].days) : [];
     var chRows = C.chilternNext(chT, fresh(cl) ? cl.rows : null, now, 2);
-    var banner = '';
-    if (navigator.onLine === false) banner = '<div class="banner">No connection. Showing the stored timetable, so delays and cancellations won\'t appear.</div>';
-    else if (cl && !cl.ok) banner = '<div class="banner">Chiltern live times unavailable (' + esc(cl.err) + '). Showing the timetable.</div>';
-    else if (tl && !tl.ok) banner = '<div class="banner">TfL live times unavailable (' + esc(tl.err) + '). Showing the timetable.</div>';
+    var rec = store.chiltern[k], dayRec = rec && rec.days && rec.days[now.date];
+    var noToday = !!(dayRec && dayRec.trains && dayRec.trains.length === 0);
+    var notices = [];
+    ['toLondon', 'toChorley'].forEach(function (sl) {
+      var x = S.live[sl];
+      if (fresh(x) && x.notices) x.notices.forEach(function (t) { if (notices.indexOf(t) < 0) notices.push(t); });
+    });
+    var banner = notices.map(function (t) { return '<div class="banner"><b>Chiltern:</b> ' + esc(t) + '</div>'; }).join('');
+    if (navigator.onLine === false) banner += '<div class="banner">No connection. Showing the stored timetable, so delays and cancellations won\'t appear.</div>';
+    else if (cl && !cl.ok) banner += '<div class="banner">Chiltern live times unavailable (' + esc(cl.err) + '). Showing the timetable.</div>';
+    else if (tl && !tl.ok) banner += '<div class="banner">TfL live times unavailable (' + esc(tl.err) + '). Showing the timetable.</div>';
     return '<div class="row"><h1 class="serif">' + (toL ? 'Chorleywood' : 'London') + '</h1>' + statusPill() + '</div>' +
       '<nav class="tabs" aria-label="Direction"><a href="#london"' + (toL ? ' aria-current="page"' : '') + '>To London</a><a href="#chorley"' + (!toL ? ' aria-current="page"' : '') + '>To Chorleywood</a></nav>' +
-      banner + chilternCard(chRows, toL, chT.length > 0, S.syncing) + tubeCard(tubes, toL, !!tt, S.syncing) + footLink();
+      banner + chilternCard(chRows, toL, chT.length > 0, S.syncing, noToday) + tubeCard(tubes, toL, !!tt, S.syncing) + footLink();
   }
 
   var STATUS = { new: ['Stored', 'good'], same: ['Matches', 'good'], updated: ['Updated', 'good'], error: ['Check failed', 'bad'], none: ['Not stored', 'bad'] };

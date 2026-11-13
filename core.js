@@ -197,6 +197,7 @@
     }
   }
 
+  var SLACK = 1; // minutes of difference between live and timetable that we treat as on time
   function nextTubes(tt, now, predMinutes, count, others) {
     var cands = tubeCandidates(tt, now, 360);
     var haveLive = !!(predMinutes && predMinutes.length);
@@ -209,6 +210,7 @@
       if (c.liveDep != null) {
         c.live = true;
         c.delay = Math.round(c.liveDep - c.sched);
+        if (Math.abs(c.delay) <= SLACK) c.delay = 0; // a minute either way is rounding between sources, not a real delay
         c.dep = c.sched + c.delay;
         c.arr = c.schedArr + c.delay;
       }
@@ -434,11 +436,16 @@
       if (l.cancelled) { e.status = 'cancelled'; return; }
       if (l.depLive != null) {
         var d = l.depLive; if (d < s - 60) d += 1440;
-        e.dep = d; e.delay = Math.round(d - s);
-        e.status = e.delay >= 1 ? 'late' : 'ontime';
+        e.delay = Math.round(d - s);
+        if (Math.abs(e.delay) <= SLACK) { e.delay = 0; d = s; } // within a minute counts as on time
+        e.dep = d;
+        e.status = e.delay > SLACK ? 'late' : 'ontime';
       } else if (l.delayedUnknown) { e.status = 'late'; e.delay = null; }
       else { e.status = 'ontime'; }
-      if (l.arrLive != null) e.arr = wrap(l.arrLive, e.dep);
+      if (l.arrLive != null) {
+        e.arr = wrap(l.arrLive, e.dep);
+        if (e.schedArr != null && Math.abs(e.arr - e.schedArr) <= SLACK) e.arr = e.schedArr;
+      }
       else if (e.schedArr != null) e.arr = e.schedArr + (e.dep - e.sched);
     });
     var list = Object.keys(map).map(function (k) { return map[k]; })

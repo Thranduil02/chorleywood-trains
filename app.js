@@ -5,7 +5,7 @@
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v29';
+  var BUILD = 'v30';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -200,10 +200,16 @@
     todo.forEach(function (k) { ST(k).syncTryAt = Date.now(); });
     save();
     S.syncing = true; render();
-    return todo.reduce(function (p, k) {
-      return p.then(function () { return syncTfl(k); }).then(function () { save(); render(); return syncChiltern(k, !!force); }).then(function () { save(); render(); })
-        .catch(function (e) { log(k + ' sync error: ' + errText(e)); save(); });
-    }, Promise.resolve()).finally(function () { S.syncing = false; render(); });
+    var each = function (fn) { // one station at a time, home first; one station failing never stops the rest
+      return function () {
+        return todo.reduce(function (p, k) {
+          return p.then(function () { return fn(k); }).then(function () { save(); render(); })
+            .catch(function (e) { log(k + ' sync error: ' + errText(e)); save(); });
+        }, Promise.resolve());
+      };
+    };
+    // the Metropolitan timetables are cheap, so every station gets one first; Chiltern's take many calls each
+    return Promise.resolve().then(each(syncTfl)).then(each(function (k) { return syncChiltern(k, !!force); })).finally(function () { S.syncing = false; render(); });
   }
 
   /* ---------- live data ---------- */
@@ -425,17 +431,18 @@
   }
 
   function viewData() {
-    var t = ST().tfl || {}, c = ST().chiltern || {};
     var tubeL = S.live[lk('tube')];
-    var nDays = c.toLondon ? Object.keys(c.toLondon.days).length : 0;
+    var stored = STATION_KEYS.map(function (k) {
+      var t = ST(k).tfl || {}, c = ST(k).chiltern || {}, nDays = c.toLondon ? Object.keys(c.toLondon.days).length : 0, nm = esc(STATIONS[k].name) + (k === store.home ? ' (home)' : '');
+      return '<div class="li"><div><div class="n">' + nm + ' · Metropolitan</div><div class="d">' + (t.fetchedAt ? 'Stored ' + when(t.fetchedAt) + ' · checked ' + when(t.checkedAt) : 'Nothing stored yet') + (t.error ? ' · ' + esc(t.error) : '') + '</div></div>' + sp(t.status) + '</div>' +
+        '<div class="li"><div><div class="n">' + nm + ' · Chiltern</div><div class="d">' + (c.checkedAt ? nDays + ' days stored · checked ' + when(c.checkedAt) : 'Nothing stored yet') + (c.error ? ' · ' + esc(c.error) : '') + '</div></div>' + sp(c.status) + '</div>';
+    }).join('');
     return '<a class="back" href="#' + store.settings.tab + '"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>Back</a>' +
       '<h1 class="serif">Data &amp; Sync Status</h1>' +
       '<section class="list" aria-label="Live feeds"><h2>Live feeds</h2>' +
       liveRow('TfL', [tubeL, S.live.bst], tubeL && S.live.bst && tubeL.ok && S.live.bst.ok ? (tubeL.ms.length + S.live.bst.ms.length) + ' trains tracked' : '') +
       liveRow('Chiltern Railways', [S.live[lk('toLondon')], S.live[lk('toChorley')]]) + '</section>' +
-      '<section class="list" aria-label="Stored timetables"><h2>Stored timetables \u00b7 ' + esc(H().name) + '</h2>' +
-      '<div class="li"><div><div class="n">TfL Metropolitan line</div><div class="d">' + (t.fetchedAt ? 'Stored ' + when(t.fetchedAt) + ' · checked ' + when(t.checkedAt) : 'Nothing stored') + (t.error ? ' · ' + esc(t.error) : '') + '</div></div>' + sp(t.status) + '</div>' +
-      '<div class="li"><div><div class="n">Chiltern Railways</div><div class="d">' + (c.checkedAt ? nDays + ' days stored · checked ' + when(c.checkedAt) : 'Nothing stored') + (c.error ? ' · ' + esc(c.error) : '') + '</div></div>' + sp(c.status) + '</div></section>' +
+      '<section class="list" aria-label="Stored timetables"><h2>Stored timetables</h2>' + stored + '</section>' +
       '<section class="note"><b>How times are shown.</b> Online, each time is the live prediction, with the timetable time beneath it when they differ. Offline, you see the stored timetable only.</section>' +
       '<button class="btn" type="button" data-act="check"' + (S.syncing ? ' disabled' : '') + '>' + (S.syncing ? 'Checking…' : 'Check now') + '</button>' +
       '<details><summary>Diagnostics</summary><pre>' + esc(diagnostics()) + '</pre></details>' +

@@ -4,7 +4,7 @@
 const ALLOWED_ORIGIN = 'https://thranduil02.github.io';
 const RDM_BASE = 'https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/LDBWS/api/20220120';
 const TFL_BASE = 'https://api.tfl.gov.uk';
-const STATIONS = ['CLW', 'MYB'];
+const STATIONS = ['CLW', 'CFO', 'MYB'];
 
 // TfL paths the app may use, with how long (seconds) a response may be shared between callers
 const TFL_ROUTES = [

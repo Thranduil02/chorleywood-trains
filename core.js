@@ -7,7 +7,7 @@
 
   var ID = {
     CYD: '940GZZLUCYD', BST: '940GZZLUBST', UXB: '940GZZLUUXB', WAF: '940GZZLUWAF',
-    CLW_RAIL: '910GCHRW', MYB_RAIL: '910GMARYLBN'
+    CAL: '940GZZLUCAL', CLW_RAIL: '910GCHRW', CFO_RAIL: '910GCHLFNAL', MYB_RAIL: '910GMARYLBN'
   };
 
   // Stations between Moor Park and Harrow-on-the-Hill (MID) and between Harrow and Finchley Road (INNER).

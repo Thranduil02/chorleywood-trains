@@ -5,7 +5,7 @@
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v31';
+  var BUILD = 'v32';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -41,7 +41,8 @@
   if (!STATIONS[store.home]) store.home = 'CLW';
   function ST(k) { var o = store.st[k || store.home] = store.st[k || store.home] || {}; o.chiltern = o.chiltern || {}; return o; }
   function H() { return STATIONS[store.home]; }
-  function syncOrder() { return [store.home].concat(STATION_KEYS.filter(function (k) { return k !== store.home; })); }
+  var SYNC_ORDER = ['CLW', 'CFO', 'RIC', 'AMR']; // after the home station, everything for one station is stored before the next starts
+  function syncOrder() { return [store.home].concat(SYNC_ORDER.filter(function (k) { return k !== store.home; })); }
   function lk(name, k) { return (k || store.home) + ':' + name; } // live-reading slot for a station
   function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { /* storage full or blocked */ } }
   function log(msg) {
@@ -201,18 +202,12 @@
     todo.forEach(function (k) { ST(k).syncTryAt = Date.now(); });
     save();
     S.syncing = true; render();
-    var each = function (fn) { // one station at a time, home first; one station failing never stops the rest
-      return function () {
-        return todo.reduce(function (p, k) {
-          return p.then(function () { return fn(k); }).then(function () { save(); render(); })
-            .catch(function (e) { log(k + ' sync error: ' + errText(e)); save(); });
-        }, Promise.resolve());
-      };
-    };
-    // the Metropolitan timetables are cheap, so every station gets one first; Chiltern's take many calls each, hence today before later days
-    return Promise.resolve().then(each(syncTfl))
-      .then(each(function (k) { return syncChiltern(k, !!force, 0, 0); })) // today first for every station, so each is usable quickly
-      .then(each(function (k) { return syncChiltern(k, !!force, 1, DAYS_AHEAD); })).finally(function () { S.syncing = false; render(); });
+    // one station at a time: its Metropolitan timetable, then all its Chiltern days; one station failing never stops the rest
+    return todo.reduce(function (p, k) {
+      return p.then(function () { return syncTfl(k); }).then(function () { save(); render(); return syncChiltern(k, !!force, 0, DAYS_AHEAD); })
+        .then(function () { save(); render(); })
+        .catch(function (e) { log(k + ' sync error: ' + errText(e)); save(); });
+    }, Promise.resolve()).finally(function () { S.syncing = false; render(); });
   }
 
   /* ---------- live data ---------- */

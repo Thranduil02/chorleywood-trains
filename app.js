@@ -5,7 +5,7 @@
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v27';
+  var BUILD = 'v28';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -28,7 +28,11 @@
       // trains that end here (the Chesham shuttle) never go to London, so keep them out of the matching
       southbound: function (a) { return (/southbound/i.test(a.platformName || '') || a.direction === 'outbound') && !/chalfont/i.test(a.destinationName || ''); } }
   };
-  var STATION_KEYS = ['CLW', 'CFO'];
+  var allDay = function (a) { return /southbound/i.test(a.platformName || '') || a.direction === 'outbound'; };
+  STATIONS.RIC = { key: 'RIC', name: 'Rickmansworth', tube: ID.RKW, rail: ID.RKW_RAIL, crs: 'RIC', southbound: allDay };
+  // Amersham: Chesham trains do not call, so they are treated as a separate branch when matching live times
+  STATIONS.AMR = { key: 'AMR', name: 'Amersham', tube: ID.AMS, rail: ID.AMR_RAIL, crs: 'AMR', southbound: allDay, split: true };
+  var STATION_KEYS = ['RIC', 'CLW', 'CFO', 'AMR']; // along the line, outwards from London
   if (!store.st) { // first run of the multi-station version: move the old single-station data under Chorleywood
     store.st = { CLW: { tfl: store.tfl, chiltern: store.chiltern || {}, syncTryAt: store.syncTryAt } };
     store.others = store.tfl && store.tfl.others; if (store.tfl) delete store.tfl.others;
@@ -37,7 +41,7 @@
   if (!STATIONS[store.home]) store.home = 'CLW';
   function ST(k) { var o = store.st[k || store.home] = store.st[k || store.home] || {}; o.chiltern = o.chiltern || {}; return o; }
   function H() { return STATIONS[store.home]; }
-  function otherKey() { return STATION_KEYS.filter(function (k) { return k !== store.home; })[0]; }
+  function syncOrder() { return [store.home].concat(STATION_KEYS.filter(function (k) { return k !== store.home; })); }
   function lk(name, k) { return (k || store.home) + ':' + name; } // live-reading slot for a station
   function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { /* storage full or blocked */ } }
   function log(msg) {
@@ -94,11 +98,11 @@
         changedAt: status === 'same' ? prev.changedAt : Date.now()
       };
       log(stn.name + ' TfL timetable ' + status + ' (' + countJ(out) + ' + ' + countJ(back) + ' journeys)');
-      if (store.others && Date.now() - store.others.at < 6 * 3600000) return null; // shared by both stations, no need to refetch often
-      // Uxbridge and Watford departures from Baker Street, used only to tell unlabelled live predictions apart
-      return Promise.all([tflJson(base + ID.BST + '/to/' + ID.UXB, 20000), tflJson(base + ID.BST + '/to/' + ID.WAF, 20000)]).then(function (o) {
-        store.others = { U: C.parseBranch(o[0], ID.UXB), W: C.parseBranch(o[1], ID.WAF), at: Date.now() };
-        log('Other branches stored (Uxbridge ' + store.others.U.reduce(function (n, x) { return n + x.d.length; }, 0) + ', Watford ' + store.others.W.reduce(function (n, x) { return n + x.d.length; }, 0) + ' departures)');
+      if (store.others && store.others.S && Date.now() - store.others.at < 6 * 3600000) return null; // shared by all stations, no need to refetch often
+      // Uxbridge, Watford and Chesham departures from Baker Street, used only to tell unlabelled live predictions apart
+      return Promise.all([tflJson(base + ID.BST + '/to/' + ID.UXB, 20000), tflJson(base + ID.BST + '/to/' + ID.WAF, 20000), tflJson(base + ID.BST + '/to/' + ID.CSM, 20000)]).then(function (o) {
+        store.others = { U: C.parseBranch(o[0], ID.UXB), W: C.parseBranch(o[1], ID.WAF), S: C.parseBranch(o[2], ID.CSM), at: Date.now() };
+        log('Other branches stored (Uxbridge ' + store.others.U.reduce(function (n, x) { return n + x.d.length; }, 0) + ', Watford ' + store.others.W.reduce(function (n, x) { return n + x.d.length; }, 0) + ', Chesham ' + store.others.S.reduce(function (n, x) { return n + x.d.length; }, 0) + ' departures)');
       }).catch(function (e) { log('Other branches failed: ' + errText(e)); });
     }).catch(function (e) {
       T.tfl = T.tfl || {};
@@ -187,8 +191,8 @@
 
   function syncAll(force) {
     if (S.syncing) return Promise.resolve();
-    // don't re-run the whole check on every reload; the home station goes first, then the other one is kept ready for a quick switch
-    var todo = [store.home, otherKey()].filter(function (k) {
+    // don't re-run the whole check on every reload; the home station goes first, then the others are kept ready for a quick switch
+    var todo = syncOrder().filter(function (k) {
       var T = ST(k), gap = T.tfl && T.tfl.out ? 10 * 60000 : 60000;
       return force || !T.syncTryAt || Date.now() - T.syncTryAt >= gap;
     });
@@ -327,12 +331,20 @@
   }
 
   function footLink() {
-    var o = STATIONS[otherKey()];
-    return '<button class="link" type="button" data-act="switch" style="width:100%;border:0;font:inherit;font-weight:600;text-align:left;cursor:pointer;margin-bottom:10px;color:inherit">' +
+    var open = !!S.menuOpen;
+    var chev = open ? 'M3 10l5-5 5 5' : 'M3 6l5 5 5-5';
+    var h = '<button class="link" type="button" data-act="menu" aria-expanded="' + open + '" style="width:100%;border:0;font:inherit;font-weight:600;text-align:left;cursor:pointer;margin-bottom:10px;color:inherit">' +
       '<span style="display:flex;flex-direction:column;gap:1px;padding:8px 0"><span>Change home station</span>' +
-      '<span class="small" style="font-family:-apple-system,system-ui,sans-serif;font-weight:400">' + esc(H().name) + ' \u2192 ' + esc(o.name) + '</span></span>' +
-      '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h9l-3-3M13 10H4l3 3"/></svg></button>' +
-      '<a class="link" href="#data"><span>Data &amp; Sync Status</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></a>';
+      '<span class="small" style="font-family:-apple-system,system-ui,sans-serif;font-weight:400">Now: ' + esc(H().name) + '</span></span>' +
+      '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + chev + '"/></svg></button>';
+    if (open) {
+      h += '<div class="menu" role="listbox" aria-label="Home station">' + STATION_KEYS.map(function (k) {
+        var on = k === store.home;
+        return '<button type="button" class="opt' + (on ? ' on' : '') + '" role="option" aria-selected="' + on + '" data-act="home" data-k="' + k + '"><span>' + esc(STATIONS[k].name) + '</span>' +
+          (on ? '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg>' : '') + '</button>';
+      }).join('') + '</div>';
+    }
+    return h + '<a class="link" href="#data"><span>Data &amp; Sync Status</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#14161A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg></a>';
   }
 
   function viewMain(dir) {
@@ -342,9 +354,11 @@
     var tt = T && (toL ? T.out : T.back);
     var tl = toL ? S.live[lk('tube')] : S.live.bst, cl = S.live[lk(k)];
     var oth = !toL && store.others;
-    var others = oth ? { U: C.branchNear(oth.U, now, 360), W: C.branchNear(oth.W, now, 360) } : null;
-    var preds = fresh(tl) ? tl.preds.filter(function (p) { return toL || others || p.cls === 'C'; }) // without the other branches, trust only labelled trains
-      .map(function (p) { return { m: (p.t - now.midnightMs) / 60000, platform: p.platform, cls: p.cls || null }; }) : null;
+    var split = !!H().split;
+    var others = oth ? { U: C.branchNear(oth.U, now, 360), W: C.branchNear(oth.W, now, 360), S: split && oth.S ? C.branchNear(oth.S, now, 360) : [] } : null;
+    var cls = function (p) { return p.lbl != null ? C.branchOfLabel(p.lbl, split) : (p.cls || null); };
+    var preds = fresh(tl) ? tl.preds.filter(function (p) { return toL || others || cls(p) === 'C'; }) // without the other branches, trust only labelled trains
+      .map(function (p) { return { m: (p.t - now.midnightMs) / 60000, platform: p.platform, cls: cls(p) }; }) : null;
     var tubes = tt ? C.nextTubes(tt, now, preds, 3, toL ? null : others) : [];
     var CH = ST().chiltern;
     var chT = CH[k] ? C.flattenDays(CH[k].days) : [];
@@ -389,7 +403,7 @@
     [lk('tube'), 'bst'].forEach(function (k) {
       var x = S.live[k]; if (x && x.sample && x.sample.length) L.push('\nraw Metropolitan arrivals ' + k + ' (* kept, - dropped)\n' + x.sample.join('\n'));
     });
-    if (store.others) L.push('\nOther branches stored: Uxbridge ' + store.others.U.reduce(function (n, x) { return n + x.d.length; }, 0) + ' departures, Watford ' + store.others.W.reduce(function (n, x) { return n + x.d.length; }, 0));
+    if (store.others) L.push('\nOther branches stored: Uxbridge ' + store.others.U.reduce(function (n, x) { return n + x.d.length; }, 0) + ' departures, Watford ' + store.others.W.reduce(function (n, x) { return n + x.d.length; }, 0) + ', Chesham ' + (store.others.S ? store.others.S.reduce(function (n, x) { return n + x.d.length; }, 0) : 'not stored'));
     else L.push('\nOther branches: not stored yet');
     var T = ST().tfl;
     if (T && T.out) {
@@ -455,9 +469,16 @@
     if (!el) return;
     var a = el.getAttribute('data-act');
     if (a === 'check') { refreshLive(true); syncAll(true); }
-    else if (a === 'switch') {
-      store.home = otherKey(); save(); render();
-      if (navigator.onLine !== false) { refreshLive(false); syncAll(false); }
+    else if (a === 'menu') {
+      S.menuOpen = !S.menuOpen; render();
+      if (S.menuOpen) { var m = document.querySelector('.menu'); if (m && m.scrollIntoView) m.scrollIntoView({ block: 'end' }); }
+    }
+    else if (a === 'home') {
+      var k = el.getAttribute('data-k');
+      if (STATIONS[k]) {
+        store.home = k; S.menuOpen = false; save(); render(); window.scrollTo(0, 0);
+        if (navigator.onLine !== false) { refreshLive(false); syncAll(false); }
+      }
     }
     else if (a === 'reset') {
       if (window.confirm('Clear the stored timetables? You will need a connection to fetch them again.')) {

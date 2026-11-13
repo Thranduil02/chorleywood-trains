@@ -7,7 +7,8 @@
 
   var ID = {
     CYD: '940GZZLUCYD', BST: '940GZZLUBST', UXB: '940GZZLUUXB', WAF: '940GZZLUWAF',
-    CAL: '940GZZLUCAL', CLW_RAIL: '910GCHRW', CFO_RAIL: '910GCHLFNAL', MYB_RAIL: '910GMARYLBN'
+    CAL: '940GZZLUCAL', RKW: '940GZZLURKW', AMS: '940GZZLUAMS', CSM: '940GZZLUCSM',
+    CLW_RAIL: '910GCHRW', CFO_RAIL: '910GCHLFNAL', RKW_RAIL: '910GRCKMNSW', AMR_RAIL: '910GAMERSHM', MYB_RAIL: '910GMARYLBN'
   };
 
   // Stations between Moor Park and Harrow-on-the-Hill (MID) and between Harrow and Finchley Road (INNER).
@@ -221,8 +222,10 @@
 
   // Which branch a prediction's label points to: C = Amersham/Chesham (calls at Chorleywood), U = Uxbridge, W = Watford,
   // null = not labelled yet ("Check Front of Train", blank, or "Baker Street" for a train that turns round there).
-  function branchOf(a) {
+  // split = true at Amersham, where Chesham trains do not call: they become their own branch 'S'.
+  function branchOf(a, split) {
     var d = (a.destinationName || '') + ' ' + (a.towards || '');
+    if (split && /chesham/i.test(d)) return 'S';
     if (/amersham|chesham/i.test(d)) return 'C';
     if (/uxbridge/i.test(d)) return 'U';
     if (/watford/i.test(d)) return 'W';
@@ -235,7 +238,7 @@
       if (filterFn && !filterFn(a)) return;
       var t = Date.parse(a.expectedArrival);
       var pm = /platform\s*([0-9]+[a-z]?)/i.exec(a.platformName || '');
-      if (!isNaN(t)) out.push({ t: t, platform: pm ? pm[1] : null, raw: a.platformName || '', cls: branchOf(a) });
+      if (!isNaN(t)) out.push({ t: t, platform: pm ? pm[1] : null, raw: a.platformName || '', cls: branchOf(a), lbl: (a.destinationName || '') + ' ' + (a.towards || '') });
     });
     return out.sort(function (a, b) { return a.t - b.t; });
   }
@@ -276,6 +279,7 @@
     var trains = cands.map(function (c) { return { t: c.sched, cls: 'C', c: c }; });
     (others.U || []).forEach(function (m) { trains.push({ t: m, cls: 'U' }); });
     (others.W || []).forEach(function (m) { trains.push({ t: m, cls: 'W' }); });
+    (others.S || []).forEach(function (m) { trains.push({ t: m, cls: 'S' }); });
     var pairs = [];
     for (i = 0; i < preds.length; i++) for (j = 0; j < trains.length; j++) {
       if (preds[i].cls && preds[i].cls !== trains[j].cls) continue;
@@ -464,7 +468,7 @@
     pad: pad, hm: hm, fmt: fmt, hash: hash, dateAdd: dateAdd, dayDiff: dayDiff, absFromLocal: absFromLocal,
     londonNow: londonNow, classify: classify, describeSkips: describeSkips, parseDays: parseDays,
     parseTimetable: parseTimetable, tubeCandidates: tubeCandidates, matchLive: matchLive, nextTubes: nextTubes,
-    parseArrivals: parseArrivals, bakerStreetNorthbound: bakerStreetNorthbound, branchOf: branchOf, parseBranch: parseBranch, branchNear: branchNear, matchNorthbound: matchNorthbound, parseJourneys: parseJourneys, buildDay: buildDay, flattenDays: flattenDays,
+    parseArrivals: parseArrivals, bakerStreetNorthbound: bakerStreetNorthbound, branchOf: branchOf, branchOfLabel: function (lbl, split) { return branchOf({ destinationName: lbl }, split); }, parseBranch: parseBranch, branchNear: branchNear, matchNorthbound: matchNorthbound, parseJourneys: parseJourneys, buildDay: buildDay, flattenDays: flattenDays,
     windowMatches: windowMatches, parseDarwin: parseDarwin, parseNotices: parseNotices, liveBoardRequest: liveBoardRequest, chilternNext: chilternNext
   };
 });

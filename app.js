@@ -1,11 +1,11 @@
-/* Chorleywood Trains – UI, storage, sync and live data. Pure logic lives in core.js. */
+/* Metroland – UI, storage, sync and live data. Pure logic lives in core.js. */
 (function () {
   'use strict';
   var C = window.Core, ID = C.ID;
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v28';
+  var BUILD = 'v29';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -442,7 +442,7 @@
       '<section class="note">To install: in Safari tap Share, then Add to Home Screen. Open it once with a connection so the timetables can be stored.</section>' +
       '<button class="btn sec" type="button" data-act="reset">Clear stored data</button>' +
       '<div class="small" style="text-align:center;margin:12px 0">Build ' + BUILD + '</div>' +
-      '<div class="small" style="text-align:center;margin:0 0 12px">Chorleywood Train Checker is a free app built by George Parish</div>';
+      '<div class="small" style="text-align:center;margin:0 0 12px">Metroland is a free app built by George Parish</div>';
   }
 
   var appEl = document.getElementById('app');

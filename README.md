@@ -1,6 +1,6 @@
-# Chorleywood Trains
+# Metroland
 
-Installable iPhone web app: next Chiltern and Metropolitan line trains between Chorleywood, Marylebone and Baker Street.
+Installable iPhone web app: next Chiltern and Metropolitan line trains from Rickmansworth, Chorleywood, Chalfont & Latimer or Amersham to London, and back.
 
 ## Put it online (it needs HTTPS hosting)
 Upload this folder's files (everything except `tests/`) to any static host, for example Netlify Drop, Cloudflare Pages or GitHub Pages.

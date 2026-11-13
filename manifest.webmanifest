@@ -1,7 +1,7 @@
 {
-  "name": "Chorleywood Trains",
-  "short_name": "Trains",
-  "description": "Chiltern and Metropolitan line times for Chorleywood, Marylebone and Baker Street",
+  "name": "Metroland",
+  "short_name": "Metroland",
+  "description": "Chiltern and Metropolitan line times for Rickmansworth, Chorleywood, Chalfont & Latimer and Amersham",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

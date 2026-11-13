@@ -1,4 +1,4 @@
-/* Chorleywood Trains – pure logic (no DOM, no network). Shared by the app and the Node tests. */
+/* Metroland – pure logic (no DOM, no network). Shared by the app and the Node tests. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.Core = factory();

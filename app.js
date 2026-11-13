@@ -5,7 +5,7 @@
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v30';
+  var BUILD = 'v31';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -111,7 +111,7 @@
     });
   }
 
-  function syncChilternDir(d, today, force, k) {
+  function syncChilternDir(d, today, force, k, lo, hi) {
     var CH = ST(k).chiltern;
     var rec = CH[d.k] = CH[d.k] || { days: {} };
     Object.keys(rec.days).forEach(function (k) { if (k < C.dateAdd(today.date, -1)) delete rec.days[k]; });
@@ -130,7 +130,7 @@
     }
     var stale = false, changed = false, isNew = false;
     var step = Promise.resolve();
-    if (!force && rec.days[today.date]) { // cheap check: does the next stretch of today still match what we stored?
+    if (lo === 0 && !force && rec.days[today.date]) { // cheap check: does the next stretch of today still match what we stored?
       step = getJ(today.date.replace(/-/g, ''), C.pad(Math.floor(today.minutes / 60)) + C.pad(Math.floor(today.minutes % 60))).then(function (j) {
         var nowStr = today.date + 'T' + C.fmt(today.minutes);
         if (!C.windowMatches(C.flattenDays(rec.days), C.parseJourneys(j), nowStr)) { stale = true; log(k + ' Chiltern ' + d.k + ': near-term times differ from stored copy'); }
@@ -138,7 +138,7 @@
     }
     step = step.then(function () {
       var chain = Promise.resolve();
-      for (var i = 0; i <= DAYS_AHEAD; i++) {
+      for (var i = lo; i <= hi; i++) {
         (function (date) {
           chain = chain.then(function () {
             var day = rec.days[date];
@@ -164,7 +164,8 @@
     return step.then(function () { return { changed: changed, isNew: isNew }; });
   }
 
-  function syncChiltern(k, force) {
+  // lo..hi = which days ahead to fetch (0 is today); the app does today for every station first, then the later days
+  function syncChiltern(k, force, lo, hi) {
     var today = C.londonNow(Date.now()), stn = STATIONS[k], CH = ST(k).chiltern;
     var dirs = [
       { k: 'toLondon', from: stn.rail, to: ID.MYB_RAIL },
@@ -173,7 +174,7 @@
     var changed = false, isNew = false, errors = [];
     return dirs.reduce(function (p, d) {
       return p.then(function () {
-        return syncChilternDir(d, today, force, k).then(function (r) { changed = changed || r.changed; isNew = isNew || r.isNew; })
+        return syncChilternDir(d, today, force, k, lo, hi).then(function (r) { changed = changed || r.changed; isNew = isNew || r.isNew; })
           .catch(function (e) { errors.push(d.k + ': ' + errText(e)); log(k + ' Chiltern ' + d.k + ' failed: ' + errText(e)); });
       });
     }, Promise.resolve()).then(function () {
@@ -208,8 +209,10 @@
         }, Promise.resolve());
       };
     };
-    // the Metropolitan timetables are cheap, so every station gets one first; Chiltern's take many calls each
-    return Promise.resolve().then(each(syncTfl)).then(each(function (k) { return syncChiltern(k, !!force); })).finally(function () { S.syncing = false; render(); });
+    // the Metropolitan timetables are cheap, so every station gets one first; Chiltern's take many calls each, hence today before later days
+    return Promise.resolve().then(each(syncTfl))
+      .then(each(function (k) { return syncChiltern(k, !!force, 0, 0); })) // today first for every station, so each is usable quickly
+      .then(each(function (k) { return syncChiltern(k, !!force, 1, DAYS_AHEAD); })).finally(function () { S.syncing = false; render(); });
   }
 
   /* ---------- live data ---------- */

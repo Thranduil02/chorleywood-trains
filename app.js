@@ -5,7 +5,7 @@
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v24';
+  var BUILD = 'v25';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -245,6 +245,12 @@
     return c1 || pc ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' + c1 + pc + '</div>' : '';
   }
 
+  // Timetabled time stays as the headline; when the live time differs, "expected hh:mm" goes underneath.
+  function expLine(sched, live, cls) {
+    if (sched == null || live == null || C.fmt(live) === C.fmt(sched)) return '';
+    return '<div class="' + (cls || 'sub') + ' late">expected ' + C.fmt(live) + '</div>';
+  }
+
   function chilternCard(rows, toL, haveTT, syncing, noServiceToday) {
     var head = '<div class="row"><span class="tag ch">Chiltern Railways</span><span class="sub" style="margin:0">' + (toL ? 'to Marylebone' : 'to Chorleywood') + '</span></div>';
     var good = rows.filter(function (r) { return r.status !== 'cancelled'; });
@@ -259,18 +265,17 @@
     var between = rows.filter(function (r) { return r.status === 'cancelled' && r.sched > first.sched && (!second || r.sched < second.sched); }).map(cline).join('');
     var dest = first.dest && !toL ? 'to ' + esc(first.dest) : '';
     var plat = toL && first.platform ? 'Platform ' + esc(first.platform) : '';
-    var line2 = [first.status === 'late' || (first.live && first.sched !== first.dep) ? 'Timetable ' + C.fmt(first.sched) : (first.live ? '' : 'Timetable'), dest, plat].filter(Boolean).join(' · ');
-    var arrSub = first.arr != null && first.schedArr != null && Math.round(first.arr) !== Math.round(first.schedArr) ? 'Timetable ' + C.fmt(first.schedArr) : '';
+    var line2 = [first.live ? '' : 'Timetable', dest, plat].filter(Boolean).join(' · ');
+    var depExp = expLine(first.sched, first.dep), arrExp = expLine(first.schedArr, first.arr);
     var h = '<section class="card" aria-label="Next Chiltern train">' + head + cancelled +
-      '<div class="row" style="align-items:flex-end"><div><div class="lbl">Departs</div><div class="big num">' + C.fmt(first.dep) + '</div>' +
+      '<div class="row" style="align-items:flex-end"><div><div class="lbl">Departs</div><div class="big num">' + C.fmt(first.sched) + '</div>' + depExp +
       (line2 ? '<div class="sub">' + line2 + '</div>' : '') + '</div>' +
-      '<div style="text-align:right"><div class="lbl">Arrives at ' + (toL ? 'Marylebone' : 'Chorleywood') + '</div><div class="mid num">' + (first.arr != null ? C.fmt(first.arr) : '–') + '</div>' +
-      (arrSub ? '<div class="sub">' + arrSub + '</div>' : '') + '</div></div>' +
+      '<div style="text-align:right"><div class="lbl">Arrives at ' + (toL ? 'Marylebone' : 'Chorleywood') + '</div><div class="mid num">' + (first.schedArr != null ? C.fmt(first.schedArr) : (first.arr != null ? C.fmt(first.arr) : '–')) + '</div>' + arrExp + '</div></div>' +
       statusRow(first, toL);
     h += between;
     if (second) {
-      var st2 = second.status === 'late' ? '<span class="small late">' + (second.delay ? '+' + second.delay + ' min' : 'Delayed') + '</span>' : '<span class="small">' + (second.live ? 'On time' : 'Timetable') + '</span>';
-      h += '<div class="next"><span>Then <b class="num">' + C.fmt(second.dep) + '</b>' + (second.dest && !toL ? ' to ' + esc(second.dest) : '') + (!toL && second.platform ? ' · Platform ' + esc(second.platform) : '') + ' · arrives ' + (second.arr != null ? C.fmt(second.arr) : '–') + '</span>' + st2 + '</div>';
+      var st2 = second.status === 'late' ? '<span class="small late">' + (second.delay && C.fmt(second.dep) !== C.fmt(second.sched) ? 'expected ' + C.fmt(second.dep) : 'Delayed') + '</span>' : '<span class="small">' + (second.live ? 'On time' : 'Timetable') + '</span>';
+      h += '<div class="next"><span>Then <b class="num">' + C.fmt(second.sched) + '</b>' + (second.dest && !toL ? ' to ' + esc(second.dest) : '') + (!toL && second.platform ? ' · Platform ' + esc(second.platform) : '') + ' · arrives ' + (second.schedArr != null ? C.fmt(second.schedArr) : (second.arr != null ? C.fmt(second.arr) : '–')) + '</span>' + st2 + '</div>';
     }
     return h + '</section>';
   }
@@ -285,11 +290,11 @@
     rows.forEach(function (r) {
       var to = C.NAME[r.last] || '';
       var skip = r.type === 'normal' ? '' : '<span class="small">' + esc(C.describeSkips(r.skipped)) + '</span>';
-      var st = r.live ? (r.delay > 0 ? '<div class="small late">+' + r.delay + ' min</div>' : '<div class="small">On time</div>') : '<div class="small">Timetable</div>';
+      var st = r.live ? (C.fmt(r.arr) !== C.fmt(r.schedArr) ? expLine(r.schedArr, r.arr, 'small') : '<div class="small">On time</div>') : '<div class="small">Timetable</div>';
       var plat = !toL && r.platform ? '<div class="small" style="font-weight:600;color:#14161A">Platform ' + esc(r.platform) + '</div>' : '';
-      body += '<div class="tube"><div class="tc"><div class="t num">' + C.fmt(r.dep) + '</div>' + plat + '</div><div class="m"><span class="ty ' + r.type + '">' + TYPE_LABEL[r.type] + '</span>' +
+      body += '<div class="tube"><div class="tc"><div class="t num">' + C.fmt(r.sched) + '</div>' + (r.live ? expLine(r.sched, r.dep, 'small') : '') + plat + '</div><div class="m"><span class="ty ' + r.type + '">' + TYPE_LABEL[r.type] + '</span>' +
         (to ? '<span class="sub" style="margin:0">to ' + esc(to) + '</span>' : '') + skip + '</div>' +
-        '<div class="r"><div class="lbl">' + (toL ? 'Baker St' : 'Chorleywood') + '</div><div class="a num">' + C.fmt(r.arr) + '</div>' + st + '</div></div>';
+        '<div class="r"><div class="lbl">' + (toL ? 'Baker St' : 'Chorleywood') + '</div><div class="a num">' + C.fmt(r.schedArr) + '</div>' + st + '</div></div>';
     });
     return '<section class="card" style="padding-bottom:4px" aria-label="Next three Metropolitan line trains">' + head + body + '</section>';
   }

@@ -1,5 +1,5 @@
 /* App-shell cache only. API calls are never intercepted: the app keeps its own timetable store. */
-var CACHE = 'trains-shell-v24';
+var CACHE = 'trains-shell-v25';
 var SHELL = ['./', 'index.html', 'app.js', 'core.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', function (e) {

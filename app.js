@@ -5,7 +5,7 @@
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v33';
+  var BUILD = 'v34';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -294,7 +294,7 @@
   }
 
   function chilternCard(rows, toL, haveTT, syncing, noServiceToday) {
-    var head = '<div class="row"><span class="tag ch">Chiltern Railways</span><span class="sub" style="margin:0">' + (toL ? 'to Marylebone' : 'to ' + esc(H().name)) + '</span></div>';
+    var head = '<div class="row"><span class="tag ch">Chiltern Railways</span><span class="sub" style="margin:0">' + (toL ? esc(H().name) + ' \u2192 Marylebone' : 'Marylebone \u2192 ' + esc(H().name)) + '</span></div>';
     var good = rows.filter(function (r) { return r.status !== 'cancelled'; });
     if (!good.length) {
       var msg = !haveTT ? (syncing ? 'Fetching the Chiltern timetable…' : 'No Chiltern timetable stored yet. Open the app once with a connection.') : (noServiceToday ? 'No Chiltern service found for today.' : 'No more Chiltern trains in the stored timetable.');
@@ -310,7 +310,7 @@
     var line2 = [first.live ? '' : 'Timetable', dest, plat].filter(Boolean).join(' · ');
     var depExp = expLine(first.sched, first.dep), arrExp = expLine(first.schedArr, first.arr);
     var h = '<section class="card" aria-label="Next Chiltern train">' + head + cancelled +
-      '<div class="row" style="align-items:flex-end"><div><div class="lbl">Departs</div><div class="big num">' + C.fmt(first.sched) + '</div>' + depExp +
+      '<div class="row" style="align-items:flex-end"><div><div class="lbl">Departs ' + (toL ? esc(H().name) : 'Marylebone') + '</div><div class="big num">' + C.fmt(first.sched) + '</div>' + depExp +
       (line2 ? '<div class="sub">' + line2 + '</div>' : '') + '</div>' +
       '<div style="text-align:right"><div class="lbl">Arrives at ' + (toL ? 'Marylebone' : esc(H().name)) + '</div><div class="mid num">' + (first.schedArr != null ? C.fmt(first.schedArr) : (first.arr != null ? C.fmt(first.arr) : '–')) + '</div>' + arrExp + '</div></div>' +
       statusRow(first, toL);
@@ -324,7 +324,7 @@
 
   var TYPE_LABEL = { fast: 'Fast', semi: 'Semi-fast', normal: 'Normal' };
   function tubeCard(rows, toL, haveTT, syncing) {
-    var head = '<div class="row" style="padding-bottom:12px"><span class="tag met">Metropolitan line</span><span class="sub" style="margin:0">' + (toL ? 'to Baker Street' : 'to ' + esc(H().name)) + '</span></div>';
+    var head = '<div class="row" style="padding-bottom:12px"><span class="tag met">Metropolitan line</span><span class="sub" style="margin:0">' + (toL ? esc(H().name) + ' \u2192 Baker Street' : 'Baker Street \u2192 ' + esc(H().name)) + '</span></div>';
     var body = '';
     if (!rows.length) {
       body = '<div class="empty" style="padding:0 0 12px">' + (!haveTT ? (syncing ? 'Fetching the TfL timetable…' : 'No TfL timetable stored yet. Open the app once with a connection.') : 'No more Metropolitan line trains in the stored timetable.') + '</div>';
@@ -334,7 +334,7 @@
       var skip = r.type === 'normal' ? '' : '<span class="small">' + esc(C.describeSkips(r.skipped)) + '</span>';
       var st = r.live ? (C.fmt(r.arr) !== C.fmt(r.schedArr) ? expLine(r.schedArr, r.arr, 'small') : '<div class="small">On time</div>') : '<div class="small">Timetable</div>';
       var plat = !toL && r.platform ? '<div class="small" style="font-weight:600;color:#14161A">Platform ' + esc(r.platform) + '</div>' : '';
-      body += '<div class="tube"><div class="tc"><div class="t num">' + C.fmt(r.sched) + '</div>' + (r.live ? expLine(r.sched, r.dep, 'small') : '') + plat + '</div><div class="m"><span class="ty ' + r.type + '">' + TYPE_LABEL[r.type] + '</span>' +
+      body += '<div class="tube"><div class="tc"><div class="lbl" style="white-space:nowrap">' + (toL ? esc(H().name) : 'Baker St') + '</div><div class="t num">' + C.fmt(r.sched) + '</div>' + (r.live ? expLine(r.sched, r.dep, 'small') : '') + plat + '</div><div class="m"><span class="ty ' + r.type + '">' + TYPE_LABEL[r.type] + '</span>' +
         (to ? '<span class="sub" style="margin:0">to ' + esc(to) + '</span>' : '') + skip + '</div>' +
         '<div class="r"><div class="lbl">' + (toL ? 'Baker St' : esc(H().name)) + '</div><div class="a num">' + C.fmt(r.schedArr) + '</div>' + st + '</div></div>';
     });

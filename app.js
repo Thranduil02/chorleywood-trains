@@ -5,7 +5,7 @@
   var TFL_DIRECT = 'https://api.tfl.gov.uk';
   var DEFAULT_BASE = 'https://chorleywood-trains.george-parish.workers.dev'; // Cloudflare Worker that holds the Rail Data Marketplace key
   var KEY = 'trains.store.v1';
-  var BUILD = 'v32';
+  var BUILD = 'v33';
   var JP_GAP_MS = window.__JP_GAP_MS != null ? window.__JP_GAP_MS : 300; // the Worker adds a TfL app key (500 requests a minute)
   var DAYS_AHEAD = 2;               // Chiltern timetable stored for today + 2 days
   var RECHECK_MS = 24 * 3600 * 1000; // re-fetch each stored Chiltern day at least this often (near-term times are checked on every launch)
@@ -138,29 +138,32 @@
       });
     }
     step = step.then(function () {
-      var chain = Promise.resolve();
+      // each day is its own walk through the timetable, so the days run side by side
+      var jobs = [];
       for (var i = lo; i <= hi; i++) {
-        (function (date) {
-          chain = chain.then(function () {
-            var day = rec.days[date];
-            var need = force || !day || Date.now() - day.fetchedAt > RECHECK_MS || (stale && date === today.date);
-            if (!need) return null;
-            return C.buildDay(getJ, date).then(function (trains) {
-              if (!trains.length) throw new Error('no Chiltern trains returned for ' + date);
-              var h = C.hash(JSON.stringify(trains));
-              if (!day) isNew = true; else if (day.hash !== h) changed = true;
-              rec.days[date] = { fetchedAt: Date.now(), hash: h, trains: trains };
-              save(); // keep progress if iOS suspends the app mid-sync
-              log(k + ' Chiltern ' + d.k + ' ' + date + ': ' + trains.length + ' trains' + (day ? (day.hash === h ? ' (unchanged)' : ' (CHANGED)') : ''));
-            }).catch(function (e) {
-              // keep an older stored copy of a future day rather than failing the whole check
-              log(k + ' Chiltern ' + d.k + ' ' + date + ' failed: ' + errText(e));
-              if (!day || date === today.date) throw e;
-            });
+        jobs.push((function (date) {
+          var day = rec.days[date];
+          var need = force || !day || Date.now() - day.fetchedAt > RECHECK_MS || (stale && date === today.date);
+          if (!need) return Promise.resolve(null);
+          return C.buildDay(getJ, date).then(function (trains) {
+            if (!trains.length) throw new Error('no Chiltern trains returned for ' + date);
+            var h = C.hash(JSON.stringify(trains));
+            if (!day) isNew = true; else if (day.hash !== h) changed = true;
+            rec.days[date] = { fetchedAt: Date.now(), hash: h, trains: trains };
+            save(); // keep progress if iOS suspends the app mid-sync
+            log(k + ' Chiltern ' + d.k + ' ' + date + ': ' + trains.length + ' trains' + (day ? (day.hash === h ? ' (unchanged)' : ' (CHANGED)') : ''));
+            return null;
+          }).catch(function (e) {
+            // keep an older stored copy of a future day rather than failing the whole check
+            log(k + ' Chiltern ' + d.k + ' ' + date + ' failed: ' + errText(e));
+            return (!day || date === today.date) ? e : null;
           });
-        })(C.dateAdd(today.date, i));
+        })(C.dateAdd(today.date, i)));
       }
-      return chain;
+      return Promise.all(jobs).then(function (res) {
+        var bad = res.filter(Boolean)[0];
+        if (bad) throw bad;
+      });
     });
     return step.then(function () { return { changed: changed, isNew: isNew }; });
   }
@@ -173,12 +176,10 @@
       { k: 'toChorley', from: ID.MYB_RAIL, to: stn.rail }
     ];
     var changed = false, isNew = false, errors = [];
-    return dirs.reduce(function (p, d) {
-      return p.then(function () {
-        return syncChilternDir(d, today, force, k, lo, hi).then(function (r) { changed = changed || r.changed; isNew = isNew || r.isNew; })
-          .catch(function (e) { errors.push(d.k + ': ' + errText(e)); log(k + ' Chiltern ' + d.k + ' failed: ' + errText(e)); });
-      });
-    }, Promise.resolve()).then(function () {
+    return Promise.all(dirs.map(function (d) {
+      return syncChilternDir(d, today, force, k, lo, hi).then(function (r) { changed = changed || r.changed; isNew = isNew || r.isNew; })
+        .catch(function (e) { errors.push(d.k + ': ' + errText(e)); log(k + ' Chiltern ' + d.k + ' failed: ' + errText(e)); });
+    })).then(function () {
       var have = CH.toLondon && Object.keys(CH.toLondon.days).length;
       CH.error = errors.length ? errors.join('; ') : null;
       if (!errors.length) {
@@ -202,12 +203,18 @@
     todo.forEach(function (k) { ST(k).syncTryAt = Date.now(); });
     save();
     S.syncing = true; render();
-    // one station at a time: its Metropolitan timetable, then all its Chiltern days; one station failing never stops the rest
-    return todo.reduce(function (p, k) {
-      return p.then(function () { return syncTfl(k); }).then(function () { save(); render(); return syncChiltern(k, !!force, 0, DAYS_AHEAD); })
+    // one station at a time, in order (home first): its Metropolitan timetable, then all its Chiltern days (six walks side by side).
+    // One at a time keeps us well inside TfL's 500-requests-a-minute allowance.
+    var queue = todo.slice();
+    function worker() {
+      if (!queue.length) return Promise.resolve();
+      var k = queue.shift();
+      return syncTfl(k).then(function () { save(); render(); return syncChiltern(k, !!force, 0, DAYS_AHEAD); })
         .then(function () { save(); render(); })
-        .catch(function (e) { log(k + ' sync error: ' + errText(e)); save(); });
-    }, Promise.resolve()).finally(function () { S.syncing = false; render(); });
+        .catch(function (e) { log(k + ' sync error: ' + errText(e)); save(); })
+        .then(worker);
+    }
+    return worker().finally(function () { S.syncing = false; render(); });
   }
 
   /* ---------- live data ---------- */
